@@ -10,19 +10,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Checkbox } from "@/components/ui/checkbox"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
-import { Plus, Trash2, Calculator, FileText, Building2, CreditCard, Database, Search, Zap } from "lucide-react"
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
+import { Plus, Trash2, Calculator, FileText, Building2, CreditCard, Database, Search, Zap, HelpCircle, Info, Send } from "lucide-react"
 import { Autocomplete } from "./components/autocomplete"
+import { enviarFacturaASiigo } from "./app/api/siigo/enviarFactura"
+import type { InvoiceItem, Provider, Product, FormData, SiigoResponse, AutocompleteOption } from "./types/siigo"
 
-interface InvoiceItem {
-  id: string
-  type: "product" | "service" | "charge" | "discount"
-  code: string
-  description: string
-  quantity: number
-  price: number
-  warehouse: string
-  hasIVA: boolean
-}
+
 
 export default function SiigoInvoiceForm() {
   const [items, setItems] = useState<InvoiceItem[]>([
@@ -41,7 +35,10 @@ export default function SiigoInvoiceForm() {
   const [hasIVA, setHasIVA] = useState(true)
   const [ivaPercentage, setIvaPercentage] = useState(19)
   const [sedeEnvio, setSedeEnvio] = useState("")
-  const [selectedProvider, setSelectedProvider] = useState<any>(null)
+  const [selectedProvider, setSelectedProvider] = useState<Provider | null>(null)
+  const [showInstructions, setShowInstructions] = useState(false)
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [submitMessage, setSubmitMessage] = useState<string>('')
 
   const addItem = () => {
     const newItem: InvoiceItem = {
@@ -61,19 +58,26 @@ export default function SiigoInvoiceForm() {
     setItems(items.filter((item) => item.id !== id))
   }
 
-  const updateItem = (id: string, field: keyof InvoiceItem, value: any) => {
+  const updateItem = (id: string, field: keyof InvoiceItem, value: string | number | boolean) => {
     setItems(items.map((item) => (item.id === id ? { ...item, [field]: value } : item)))
   }
 
-  const handleProviderSelect = (provider: any) => {
+  const handleProviderSelect = (option: AutocompleteOption) => {
+    // Convertir AutocompleteOption a Provider
+    const provider: Provider = {
+      ...option,
+      identification: option.codigo, // Mapear codigo a identification
+      name: option.nombre // Mapear nombre a name
+    }
     setSelectedProvider(provider)
   }
 
-  const handleProductSelect = (itemId: string, product: any) => {
-    updateItem(itemId, "code", product.codigo)
-    updateItem(itemId, "description", product.nombre)
-    updateItem(itemId, "price", product.precio_base || 0)
-    updateItem(itemId, "hasIVA", product.tiene_iva !== false)
+  const handleProductSelect = (itemId: string, option: AutocompleteOption) => {
+    // Usar directamente las propiedades de AutocompleteOption
+    updateItem(itemId, "code", option.codigo)
+    updateItem(itemId, "description", option.nombre)
+    updateItem(itemId, "price", option.precio_base || 0)
+    updateItem(itemId, "hasIVA", option.tiene_iva !== false)
   }
 
   const calculateSubtotal = () => {
@@ -98,250 +102,235 @@ export default function SiigoInvoiceForm() {
     return calculateSubtotal() + calculateIVA()
   }
 
+  const handleSubmitToSiigo = async (): Promise<void> => {
+    setIsSubmitting(true)
+    setSubmitMessage('')
+    
+    try {
+      // Preparar datos del formulario
+      const datosFormulario: FormData = {
+        selectedProvider,
+        items,
+        sedeEnvio,
+        hasIVA,
+        ivaPercentage,
+        observations: 'Factura generada desde formulario web'
+      }
+      
+      console.log('🚀 Enviando factura a Siigo...', datosFormulario)
+      
+      const resultado: SiigoResponse = await enviarFacturaASiigo(datosFormulario)
+      
+      if (resultado.success) {
+        setSubmitMessage('✅ Factura enviada exitosamente a Siigo!')
+        console.log('✅ Factura enviada:', resultado.data)
+      } else {
+        setSubmitMessage(`❌ Error: ${resultado.message}`)
+        console.error('❌ Error al enviar:', resultado.error)
+      }
+    } catch (error) {
+      setSubmitMessage('💥 Error inesperado al enviar la factura')
+      console.error('💥 Error:', error)
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
   return (
     <div className="max-w-6xl mx-auto p-6 space-y-6">
-      <div className="text-center space-y-2">
+      <div className="text-center space-y-2 relative">
+        <div className="absolute top-0 right-0">
+          <Dialog open={showInstructions} onOpenChange={setShowInstructions}>
+            <DialogTrigger asChild>
+              <Button variant="outline" size="sm" className="flex items-center gap-2">
+                <HelpCircle className="h-4 w-4" />
+                Manual de Uso
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto">
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2 text-blue-700">
+                  <FileText className="h-5 w-5" />
+                  📋 Manual de Uso - Sistema de Facturación Electrónica
+                </DialogTitle>
+                <DialogDescription className="text-blue-600">
+                  Guía completa para crear facturas electrónicas con Siigo API
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-4 text-sm">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                  {/* Campos Obligatorios */}
+                  <div className="space-y-3">
+                    <div className="flex items-center gap-2 text-red-600 font-medium">
+                      <Building2 className="h-4 w-4" />
+                      Campos Obligatorios
+                    </div>
+                    <ul className="space-y-2 text-xs">
+                      <li className="flex items-start gap-2">
+                        <span className="text-red-500 font-bold">•</span>
+                        <span><strong>Proveedor/Cliente:</strong> Selecciona de la lista o busca por NIT/Cédula</span>
+                      </li>
+                      <li className="flex items-start gap-2">
+                        <span className="text-red-500 font-bold">•</span>
+                        <span><strong>Productos/Servicios:</strong> Al menos un item con código, cantidad y precio</span>
+                      </li>
+                      <li className="flex items-start gap-2">
+                        <span className="text-red-500 font-bold">•</span>
+                        <span><strong>Sede de Envío:</strong> Bodega desde donde se envían los productos</span>
+                      </li>
+                    </ul>
+                  </div>
+
+                  {/* Configuración de Productos */}
+                  <div className="space-y-3">
+                    <div className="flex items-center gap-2 text-blue-600 font-medium">
+                      <Database className="h-4 w-4" />
+                      Productos y Servicios
+                    </div>
+                    <ul className="space-y-2 text-xs">
+                      <li className="flex items-start gap-2">
+                        <span className="text-blue-500 font-bold">•</span>
+                        <span><strong>Código:</strong> Identificador único del producto en Siigo</span>
+                      </li>
+                      <li className="flex items-start gap-2">
+                        <span className="text-blue-500 font-bold">•</span>
+                        <span><strong>Descripción:</strong> Nombre detallado del producto o servicio</span>
+                      </li>
+                      <li className="flex items-start gap-2">
+                        <span className="text-blue-500 font-bold">•</span>
+                        <span><strong>Cantidad:</strong> Número de unidades (acepta decimales)</span>
+                      </li>
+                      <li className="flex items-start gap-2">
+                        <span className="text-blue-500 font-bold">•</span>
+                        <span><strong>Precio:</strong> Valor unitario sin IVA</span>
+                      </li>
+                      <li className="flex items-start gap-2">
+                        <span className="text-blue-500 font-bold">•</span>
+                        <span><strong>IVA:</strong> Marcar si el producto tiene impuesto</span>
+                      </li>
+                    </ul>
+                  </div>
+
+                  {/* Configuración de IVA */}
+                  <div className="space-y-3">
+                    <div className="flex items-center gap-2 text-green-600 font-medium">
+                      <Calculator className="h-4 w-4" />
+                      Configuración de IVA
+                    </div>
+                    <ul className="space-y-2 text-xs">
+                      <li className="flex items-start gap-2">
+                        <span className="text-green-500 font-bold">•</span>
+                        <span><strong>Aplicar IVA:</strong> Activa/desactiva el impuesto para toda la factura</span>
+                      </li>
+                      <li className="flex items-start gap-2">
+                        <span className="text-green-500 font-bold">•</span>
+                        <span><strong>Porcentaje:</strong> 0%, 5% o 19% según el producto</span>
+                      </li>
+                      <li className="flex items-start gap-2">
+                        <span className="text-green-500 font-bold">•</span>
+                        <span><strong>Cálculo:</strong> Se aplica automáticamente a productos marcados</span>
+                      </li>
+                    </ul>
+                  </div>
+
+                  {/* Información de Pago */}
+                  <div className="space-y-3">
+                    <div className="flex items-center gap-2 text-purple-600 font-medium">
+                      <CreditCard className="h-4 w-4" />
+                      Métodos de Pago
+                    </div>
+                    <ul className="space-y-2 text-xs">
+                      <li className="flex items-start gap-2">
+                        <span className="text-purple-500 font-bold">•</span>
+                        <span><strong>ID 8468:</strong> Método de pago configurado para tu sucursal</span>
+                      </li>
+                      <li className="flex items-start gap-2">
+                        <span className="text-purple-500 font-bold">•</span>
+                        <span><strong>Valor Total:</strong> Se calcula automáticamente (Subtotal + IVA)</span>
+                      </li>
+                      <li className="flex items-start gap-2">
+                        <span className="text-purple-500 font-bold">•</span>
+                        <span><strong>Moneda:</strong> Pesos colombianos (COP)</span>
+                      </li>
+                    </ul>
+                  </div>
+
+                  {/* Proceso de Envío */}
+                  <div className="space-y-3">
+                    <div className="flex items-center gap-2 text-orange-600 font-medium">
+                      <Zap className="h-4 w-4" />
+                      Proceso de Envío
+                    </div>
+                    <ul className="space-y-2 text-xs">
+                      <li className="flex items-start gap-2">
+                        <span className="text-orange-500 font-bold">•</span>
+                        <span><strong>Validación:</strong> Se verifican todos los campos obligatorios</span>
+                      </li>
+                      <li className="flex items-start gap-2">
+                        <span className="text-orange-500 font-bold">•</span>
+                        <span><strong>Autenticación:</strong> Se obtiene token automáticamente</span>
+                      </li>
+                      <li className="flex items-start gap-2">
+                        <span className="text-orange-500 font-bold">•</span>
+                        <span><strong>Envío DIAN:</strong> Se envía directamente a facturación electrónica</span>
+                      </li>
+                      <li className="flex items-start gap-2">
+                        <span className="text-orange-500 font-bold">•</span>
+                        <span><strong>Confirmación:</strong> Recibes el CUFE si es exitoso</span>
+                      </li>
+                    </ul>
+                  </div>
+
+                  {/* Códigos y Referencias */}
+                  <div className="space-y-3">
+                    <div className="flex items-center gap-2 text-gray-600 font-medium">
+                      <Search className="h-4 w-4" />
+                      Códigos de Referencia
+                    </div>
+                    <ul className="space-y-2 text-xs">
+                      <li className="flex items-start gap-2">
+                        <span className="text-gray-500 font-bold">•</span>
+                        <span><strong>Documento:</strong> ID 138531 (Factura Electrónica)</span>
+                      </li>
+                      <li className="flex items-start gap-2">
+                        <span className="text-gray-500 font-bold">•</span>
+                        <span><strong>Vendedor:</strong> ID 35260 (Usuario del sistema)</span>
+                      </li>
+                      <li className="flex items-start gap-2">
+                        <span className="text-gray-500 font-bold">•</span>
+                        <span><strong>IVA:</strong> ID 13156 (Impuesto 19%)</span>
+                      </li>
+                      <li className="flex items-start gap-2">
+                        <span className="text-gray-500 font-bold">•</span>
+                        <span><strong>Pago:</strong> ID 8468 (Método configurado)</span>
+                      </li>
+                    </ul>
+                  </div>
+                </div>
+
+                <div className="mt-6 p-4 bg-blue-50 rounded-lg border border-blue-200">
+                  <div className="flex items-start gap-3">
+                    <Info className="h-5 w-5 text-blue-600 mt-0.5" />
+                    <div>
+                      <h4 className="font-medium text-blue-900 mb-2">💡 Consejos Importantes</h4>
+                      <ul className="space-y-1 text-xs text-blue-800">
+                        <li>• Verifica que el proveedor/cliente exista en Siigo antes de facturar</li>
+                        <li>• Los códigos de productos deben estar registrados y activos en Siigo</li>
+                        <li>• Las facturas electrónicas no pueden tener fecha anterior al día actual</li>
+                        <li>• El sistema calcula automáticamente subtotales, IVA y totales</li>
+                        <li>• Guarda borradores para completar facturas más tarde</li>
+                      </ul>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </DialogContent>
+          </Dialog>
+        </div>
         <h1 className="text-3xl font-bold flex items-center justify-center gap-2">
           <FileText className="h-8 w-8 text-blue-600" />
           Facturación Electrónica Siigo
         </h1>
-
-        {/* Instructivo Mejorado */}
-        <Card className="bg-gradient-to-r from-blue-50 to-indigo-50 border-blue-200">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-blue-700">
-              <FileText className="h-5 w-5" />📋 Manual de Uso - Sistema de Facturación Electrónica
-            </CardTitle>
-            <CardDescription className="text-blue-600">
-              Guía completa para crear facturas electrónicas con Siigo API
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4 text-sm">
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {/* Campos Obligatorios */}
-              <div className="space-y-3">
-                <h4 className="font-semibold text-blue-800 flex items-center gap-2">
-                  <span className="w-6 h-6 bg-red-100 text-red-600 rounded-full flex items-center justify-center text-xs">
-                    !
-                  </span>
-                  Campos Obligatorios
-                </h4>
-                <ul className="space-y-2 text-blue-700">
-                  <li className="flex items-start gap-2">
-                    <span className="text-red-500 mt-1">•</span>
-                    <span>
-                      <strong>ID Documento:</strong> Identificador único del comprobante
-                    </span>
-                  </li>
-                  <li className="flex items-start gap-2">
-                    <span className="text-red-500 mt-1">•</span>
-                    <span>
-                      <strong>Fecha de Factura:</strong> Fecha de emisión obligatoria
-                    </span>
-                  </li>
-                  <li className="flex items-start gap-2">
-                    <span className="text-red-500 mt-1">•</span>
-                    <span>
-                      <strong>Código/Proveedor:</strong> Cliente o proveedor de la BD
-                    </span>
-                  </li>
-                  <li className="flex items-start gap-2">
-                    <span className="text-red-500 mt-1">•</span>
-                    <span>
-                      <strong>Mínimo 1 Item:</strong> Al menos un producto/servicio
-                    </span>
-                  </li>
-                </ul>
-              </div>
-
-              {/* Autocompletado Inteligente */}
-              <div className="space-y-3">
-                <h4 className="font-semibold text-blue-800 flex items-center gap-2">
-                  <Search className="w-5 h-5" />
-                  Autocompletado Inteligente
-                </h4>
-                <ul className="space-y-2 text-blue-700">
-                  <li className="flex items-start gap-2">
-                    <Zap className="w-4 h-4 mt-1 text-yellow-500" />
-                    <span>
-                      <strong>Proveedores:</strong> Busca por código o nombre
-                    </span>
-                  </li>
-                  <li className="flex items-start gap-2">
-                    <Zap className="w-4 h-4 mt-1 text-yellow-500" />
-                    <span>
-                      <strong>Productos:</strong> Auto-llena precio y configuración IVA
-                    </span>
-                  </li>
-                  <li className="flex items-start gap-2">
-                    <Zap className="w-4 h-4 mt-1 text-yellow-500" />
-                    <span>
-                      <strong>Búsqueda en tiempo real:</strong> Mínimo 2 caracteres
-                    </span>
-                  </li>
-                  <li className="flex items-start gap-2">
-                    <Zap className="w-4 h-4 mt-1 text-yellow-500" />
-                    <span>
-                      <strong>Conexión BD:</strong> Datos actualizados automáticamente
-                    </span>
-                  </li>
-                </ul>
-              </div>
-
-              {/* Funciones Automáticas */}
-              <div className="space-y-3">
-                <h4 className="font-semibold text-blue-800 flex items-center gap-2">
-                  <Calculator className="w-5 h-5" />
-                  Funciones Automáticas
-                </h4>
-                <ul className="space-y-2 text-blue-700">
-                  <li className="flex items-start gap-2">
-                    <span className="text-green-500 mt-1">✓</span>
-                    <span>
-                      <strong>Bodega:</strong> Se llena desde "Sede de Envío"
-                    </span>
-                  </li>
-                  <li className="flex items-start gap-2">
-                    <span className="text-green-500 mt-1">✓</span>
-                    <span>
-                      <strong>Cálculos:</strong> Subtotales, IVA y total en tiempo real
-                    </span>
-                  </li>
-                  <li className="flex items-start gap-2">
-                    <span className="text-green-500 mt-1">✓</span>
-                    <span>
-                      <strong>ID Pago:</strong> Generado automáticamente (8468)
-                    </span>
-                  </li>
-                  <li className="flex items-start gap-2">
-                    <span className="text-green-500 mt-1">✓</span>
-                    <span>
-                      <strong>Formato:</strong> Moneda colombiana (COP)
-                    </span>
-                  </li>
-                </ul>
-              </div>
-
-              {/* Gestión de Items */}
-              <div className="space-y-3">
-                <h4 className="font-semibold text-blue-800 flex items-center gap-2">
-                  <Building2 className="w-5 h-5" />
-                  Gestión de Items
-                </h4>
-                <ul className="space-y-2 text-blue-700">
-                  <li className="flex items-start gap-2">
-                    <span className="text-blue-500 mt-1">→</span>
-                    <span>
-                      <strong>Tipos:</strong> Producto, Servicio, Cargo, Descuento
-                    </span>
-                  </li>
-                  <li className="flex items-start gap-2">
-                    <span className="text-blue-500 mt-1">→</span>
-                    <span>
-                      <strong>IVA Individual:</strong> Cada item puede tener IVA diferente
-                    </span>
-                  </li>
-                  <li className="flex items-start gap-2">
-                    <span className="text-blue-500 mt-1">→</span>
-                    <span>
-                      <strong>Dinámico:</strong> Agregar/eliminar items ilimitados
-                    </span>
-                  </li>
-                  <li className="flex items-start gap-2">
-                    <span className="text-blue-500 mt-1">→</span>
-                    <span>
-                      <strong>Validación:</strong> Campos requeridos por tipo
-                    </span>
-                  </li>
-                </ul>
-              </div>
-
-              {/* IVA y Totales */}
-              <div className="space-y-3">
-                <h4 className="font-semibold text-blue-800 flex items-center gap-2">
-                  <CreditCard className="w-5 h-5" />
-                  IVA y Totales
-                </h4>
-                <ul className="space-y-2 text-blue-700">
-                  <li className="flex items-start gap-2">
-                    <span className="text-purple-500 mt-1">%</span>
-                    <span>
-                      <strong>IVA General:</strong> 0%, 5%, 19% (default: 19%)
-                    </span>
-                  </li>
-                  <li className="flex items-start gap-2">
-                    <span className="text-purple-500 mt-1">%</span>
-                    <span>
-                      <strong>IVA por Item:</strong> Control individual por producto
-                    </span>
-                  </li>
-                  <li className="flex items-start gap-2">
-                    <span className="text-purple-500 mt-1">%</span>
-                    <span>
-                      <strong>Cálculo Inteligente:</strong> Solo items con IVA activado
-                    </span>
-                  </li>
-                  <li className="flex items-start gap-2">
-                    <span className="text-purple-500 mt-1">%</span>
-                    <span>
-                      <strong>Resumen:</strong> Desglose completo de totales
-                    </span>
-                  </li>
-                </ul>
-              </div>
-
-              {/* Base de Datos */}
-              <div className="space-y-3">
-                <h4 className="font-semibold text-blue-800 flex items-center gap-2">
-                  <Database className="w-5 h-5" />
-                  Base de Datos
-                </h4>
-                <ul className="space-y-2 text-blue-700">
-                  <li className="flex items-start gap-2">
-                    <span className="text-indigo-500 mt-1">◆</span>
-                    <span>
-                      <strong>Tabla Proveedores:</strong> Código + Nombre
-                    </span>
-                  </li>
-                  <li className="flex items-start gap-2">
-                    <span className="text-indigo-500 mt-1">◆</span>
-                    <span>
-                      <strong>Tabla Productos:</strong> Código + Nombre + Precio + IVA
-                    </span>
-                  </li>
-                  <li className="flex items-start gap-2">
-                    <span className="text-indigo-500 mt-1">◆</span>
-                    <span>
-                      <strong>API REST:</strong> Consultas optimizadas
-                    </span>
-                  </li>
-                  <li className="flex items-start gap-2">
-                    <span className="text-indigo-500 mt-1">◆</span>
-                    <span>
-                      <strong>Performance:</strong> Índices para búsquedas rápidas
-                    </span>
-                  </li>
-                </ul>
-              </div>
-            </div>
-
-            {/* Nota importante */}
-            <div className="mt-6 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
-              <div className="flex items-start gap-3">
-                <span className="text-yellow-600 text-lg">💡</span>
-                <div>
-                  <h5 className="font-semibold text-yellow-800 mb-1">Tip Importante:</h5>
-                  <p className="text-yellow-700 text-sm">
-                    Para usar el autocompletado, escribe al menos 2 caracteres en los campos de Código/Proveedor o
-                    Código Producto/Nombre. El sistema buscará automáticamente en la base de datos y mostrará
-                    sugerencias relevantes.
-                  </p>
-                </div>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
         <p className="text-muted-foreground">Sistema de facturación para Colombia con base de datos integrada</p>
       </div>
 
@@ -652,13 +641,40 @@ export default function SiigoInvoiceForm() {
           </CardContent>
         </Card>
 
+        {/* Mensaje de estado */}
+        {submitMessage && (
+          <div className={`p-4 rounded-lg border ${
+            submitMessage.includes('✅') 
+              ? 'bg-green-50 border-green-200 text-green-800' 
+              : 'bg-red-50 border-red-200 text-red-800'
+          }`}>
+            <p className="text-sm font-medium">{submitMessage}</p>
+          </div>
+        )}
+
         {/* Botones de Acción */}
         <div className="flex flex-col sm:flex-row gap-4 justify-end">
           <Button type="button" variant="outline" size="lg">
             Guardar Borrador
           </Button>
-          <Button type="submit" size="lg" className="bg-blue-600 hover:bg-blue-700">
-            Enviar Factura a Siigo
+          <Button 
+            type="button" 
+            size="lg" 
+            className="bg-blue-600 hover:bg-blue-700 flex items-center gap-2"
+            onClick={handleSubmitToSiigo}
+            disabled={isSubmitting || !selectedProvider || items.length === 0}
+          >
+            {isSubmitting ? (
+              <>
+                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                Enviando...
+              </>
+            ) : (
+              <>
+                <Send className="h-4 w-4" />
+                Enviar Factura a Siigo
+              </>
+            )}
           </Button>
         </div>
       </form>
