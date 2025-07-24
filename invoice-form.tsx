@@ -591,7 +591,7 @@ export default function SiigoInvoiceForm() {
   <Autocomplete
     label="Código Producto"
     placeholder="Buscar producto por código o nombre..."
-    apiEndpoint="/api/productos-sin-guion"
+    apiEndpoint="/api/productos-lista"
     value={item.code}
     onSelect={(option) => {
       updateItem(item.id, "code", option.codigo);
@@ -624,7 +624,7 @@ export default function SiigoInvoiceForm() {
       updateItem(item.id, "code", cuenta.codigo);
       updateItem(item.id, "description", cuenta.nombre);
     }}
-    readOnlyInput
+    
   />
 ) }
                   </div>

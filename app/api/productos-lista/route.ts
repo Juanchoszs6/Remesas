@@ -1,3 +1,4 @@
+// app/api/productos-lista/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { Pool } from 'pg';
 
@@ -12,33 +13,37 @@ export async function GET(req: NextRequest) {
   let sqlQuery = '';
   let values: any[] = [];
 
-  if (!query) {
-    // Si no hay parámetro de búsqueda, retornar todos los productos
-    sqlQuery = `SELECT codigo_prod as codigo, nombre_prod as nombre FROM productos ORDER BY codigo_prod`;
-  } else if (/^\d/.test(query)) {
-    // Empieza con número → buscar por código
+  if (!query || query.trim() === '') {
+    // Sin parámetro de búsqueda → devolver TODOS los productos
     sqlQuery = `
-      SELECT codigo_prod as codigo, nombre_prod as nombre 
-      FROM productos 
-      WHERE codigo_prod ILIKE $1
-      ORDER BY codigo_prod
-      LIMIT 10
+      SELECT codigo, nombre 
+      FROM productos_ 
+      ORDER BY codigo
+    `;
+    values = [];
+  } else if (/^\d/.test(query)) {
+    // Empieza con número → buscar por código (SIN LÍMITE)
+    sqlQuery = `
+      SELECT codigo, nombre 
+      FROM productos_ 
+      WHERE codigo ILIKE $1
+      ORDER BY codigo
     `;
     values = [`${query}%`];
   } else {
-    // Empieza con letra → buscar por nombre
+    // Empieza con letra → buscar por nombre (SIN LÍMITE)
     sqlQuery = `
-      SELECT codigo_prod as codigo, nombre_prod as nombre 
-      FROM productos 
-      WHERE nombre_prod ILIKE $1
-      ORDER BY nombre_prod
-      LIMIT 10
+      SELECT codigo, nombre 
+      FROM productos_ 
+      WHERE nombre ILIKE $1
+      ORDER BY nombre
     `;
     values = [`${query}%`];
   }
 
   try {
     const result = await pool.query(sqlQuery, values);
+    console.log(`[PRODUCTOS-LISTA API] Query: "${query || 'ALL'}" - Resultados: ${result.rows.length}`);
     return NextResponse.json(result.rows);
   } catch (error) {
     console.error('Error al consultar productos:', error);

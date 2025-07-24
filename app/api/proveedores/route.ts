@@ -13,36 +13,44 @@ export async function GET(req: NextRequest) {
   let sqlQuery = '';
   let values: any[] = [];
 
-  if (/^\d/.test(query)) {
-    // Empieza con número → buscar por código
+  if (query.trim() === '') {
+    // Sin parámetro de búsqueda → devolver TODOS los proveedores
+    sqlQuery = `
+      SELECT codigo, nombre 
+      FROM proveedores 
+      ORDER BY nombre
+    `;
+    values = [];
+  } else if (/^\d/.test(query)) {
+    // Empieza con número → buscar por código (sin límite)
     sqlQuery = `
       SELECT codigo, nombre 
       FROM proveedores 
       WHERE codigo ILIKE $1
       ORDER BY codigo
-      LIMIT 10
     `;
     values = [`${query}%`];
   } else {
-    // Empieza con letra → buscar por nombre
+    // Empieza con letra → buscar por nombre (sin límite)
     sqlQuery = `
       SELECT codigo, nombre 
       FROM proveedores 
       WHERE nombre ILIKE $1
       ORDER BY nombre
-      LIMIT 10
     `;
     values = [`${query}%`];
   }
 
   try {
     const result = await pool.query(sqlQuery, values);
+    console.log(`[PROVEEDORES API] Query: "${query}" - Resultados: ${result.rows.length}`);
     return NextResponse.json(result.rows);
   } catch (error) {
     console.error('Error al consultar proveedores:', error);
     return new NextResponse('Error al consultar proveedores', { status: 500 });
   }
 }
+
 export async function POST(req: NextRequest) {
   try {
     const data = await req.json();
