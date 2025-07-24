@@ -13,9 +13,9 @@ import { Separator } from "@/components/ui/separator"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { Plus, Trash2, Calculator, FileText, Building2, CreditCard, Database, Search, Zap, HelpCircle, Info, Send } from "lucide-react"
 import { Autocomplete } from "./components/autocomplete"
-import { enviarFacturaASiigo } from "./app/api/siigo/enviarFactura"
-import type { InvoiceItem, Provider, Product, FormData, SiigoResponse, AutocompleteOption } from "./types/siigo"
-
+import { useProductosLista } from "./hooks/use-productos-lista"
+import { useActivosFijos } from "./hooks/use-activos-fijos"
+import type { InvoiceItem, Provider, FormData, AutocompleteOption } from "./types/siigo"
 
 
 export default function SiigoInvoiceForm() {
@@ -32,13 +32,24 @@ export default function SiigoInvoiceForm() {
     },
   ])
 
+  // Fetch productos and activos fijos for dropdowns
+  const { data: productosLista } = useProductosLista();
+  const { data: activosFijosLista } = useActivosFijos();
+
   const [hasIVA, setHasIVA] = useState(true)
   const [ivaPercentage, setIvaPercentage] = useState(19)
   const [sedeEnvio, setSedeEnvio] = useState("")
   const [selectedProvider, setSelectedProvider] = useState<Provider | null>(null)
+  const [providerCode, setProviderCode] = useState<string>("")
+  const [providerIdentification, setProviderIdentification] = useState<string>("")
   const [showInstructions, setShowInstructions] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [submitMessage, setSubmitMessage] = useState<string>('')
+  const [invoiceDate, setInvoiceDate] = useState<string>(new Date().toISOString().split('T')[0])
+  const [observations, setObservations] = useState<string>('')
+  const [costCenter, setCostCenter] = useState<string>('')
+  const [providerInvoicePrefix, setProviderInvoicePrefix] = useState<string>('')
+  const [providerInvoiceNumber, setProviderInvoiceNumber] = useState<string>('')
 
   const addItem = () => {
     const newItem: InvoiceItem = {
@@ -70,14 +81,60 @@ export default function SiigoInvoiceForm() {
       name: option.nombre // Mapear nombre a name
     }
     setSelectedProvider(provider)
+    setProviderCode(option.codigo)
+    setProviderIdentification(option.nombre)
+  }
+
+  const handleProviderCodeChange = (code: string) => {
+    setProviderCode(code)
+    if (!code) {
+      setProviderIdentification("")
+      setSelectedProvider(null)
+    }
   }
 
   const handleProductSelect = (itemId: string, option: AutocompleteOption) => {
-    // Usar directamente las propiedades de AutocompleteOption
     updateItem(itemId, "code", option.codigo)
     updateItem(itemId, "description", option.nombre)
-    updateItem(itemId, "price", option.precio_base || 0)
-    updateItem(itemId, "hasIVA", option.tiene_iva !== false)
+    // Solo para producto, actualiza precio y hasIVA
+    const item = items.find((i) => i.id === itemId)
+    if (item?.type === "product" || item?.type === "service") {
+      if (item?.type === "product") {
+        updateItem(itemId, "price", option.precio_base || 0)
+        updateItem(itemId, "hasIVA", option.tiene_iva !== false)
+      }
+    }
+  }
+
+  const handleProductCodeChange = async (itemId: string, code: string) => {
+    updateItem(itemId, "code", code)
+    if (!code) {
+      updateItem(itemId, "description", "")
+      updateItem(itemId, "price", 0)
+      updateItem(itemId, "hasIVA", true)
+    } else {
+      // Auto-fetch product details when user types a complete code
+      try {
+        const response = await fetch(`/api/productos?q=${encodeURIComponent(code)}`)
+        if (response.ok) {
+          const productos = await response.json()
+          // Find exact match by code
+          const producto = productos.find((p: any) => p.codigo === code)
+          if (producto) {
+            updateItem(itemId, "description", producto.nombre)
+            if (producto.precio_base !== undefined) {
+              updateItem(itemId, "price", producto.precio_base)
+            }
+            if (producto.tiene_iva !== undefined) {
+              updateItem(itemId, "hasIVA", producto.tiene_iva)
+            }
+          }
+        }
+      } catch (error) {
+        console.log('Error fetching product details:', error)
+        // Silently fail - user can still manually fill description
+      }
+    }
   }
 
   const calculateSubtotal = () => {
@@ -103,10 +160,35 @@ export default function SiigoInvoiceForm() {
   }
 
   const handleSubmitToSiigo = async (): Promise<void> => {
+    console.log('[INVOICE-FORM] Iniciando envío de factura de compra a Siigo');
     setIsSubmitting(true)
     setSubmitMessage('')
     
     try {
+      // Validaciones del lado del cliente
+      if (!selectedProvider) {
+        throw new Error('Debe seleccionar un proveedor');
+      }
+      
+      if (items.length === 0) {
+        throw new Error('Debe agregar al menos un item a la factura');
+      }
+      
+      // Validar que todos los items tengan código y cantidad
+      for (const item of items) {
+        if (!item.code.trim()) {
+          throw new Error(`El item "${item.description || 'Sin descripción'}" debe tener un código`);
+        }
+        if (item.quantity <= 0) {
+          throw new Error(`El item "${item.code}" debe tener una cantidad mayor a 0`);
+        }
+        if (item.price < 0) {
+          throw new Error(`El item "${item.code}" debe tener un precio válido`);
+        }
+      }
+      
+      console.log('[INVOICE-FORM] Validaciones del cliente completadas');
+      
       // Preparar datos del formulario
       const datosFormulario: FormData = {
         selectedProvider,
@@ -114,25 +196,49 @@ export default function SiigoInvoiceForm() {
         sedeEnvio,
         hasIVA,
         ivaPercentage,
-        observations: 'Factura generada desde formulario web'
+        observations: observations || 'Factura de compra generada desde formulario web'
       }
       
-      console.log('🚀 Enviando factura a Siigo...', datosFormulario)
+      console.log('[INVOICE-FORM] Datos del formulario preparados:', {
+        proveedor: selectedProvider.identification,
+        itemsCount: items.length,
+        total: calculateTotal()
+      });
       
-      const resultado: SiigoResponse = await enviarFacturaASiigo(datosFormulario)
+      // Enviar a la nueva API de facturas de compra
+      console.log('[INVOICE-FORM] Enviando petición a /api/siigo/purchases');
+      const response = await fetch('/api/siigo/purchases', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(datosFormulario)
+      });
       
-      if (resultado.success) {
-        setSubmitMessage('✅ Factura enviada exitosamente a Siigo!')
-        console.log('✅ Factura enviada:', resultado.data)
+      console.log(`[INVOICE-FORM] Respuesta recibida: Status ${response.status}`);
+      
+      const responseData = await response.json();
+      console.log('[INVOICE-FORM] Datos de respuesta:', responseData);
+      
+      if (response.ok && responseData.success) {
+        setSubmitMessage(`✅ Factura de compra creada exitosamente en Siigo. ${responseData.message}`);
+        console.log('[INVOICE-FORM] Factura creada exitosamente:', responseData.data);
+        
+        // Opcional: Limpiar formulario después del envío exitoso
+        // resetForm()
       } else {
-        setSubmitMessage(`❌ Error: ${resultado.message}`)
-        console.error('❌ Error al enviar:', resultado.error)
+        const errorMessage = responseData.error || responseData.message || 'Error desconocido';
+        setSubmitMessage(`❌ Error: ${errorMessage}`);
+        console.error('[INVOICE-FORM] Error en la respuesta:', responseData);
       }
+      
     } catch (error) {
-      setSubmitMessage('💥 Error inesperado al enviar la factura')
-      console.error('💥 Error:', error)
+      console.error('[INVOICE-FORM] Error enviando factura:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Error desconocido';
+      setSubmitMessage(`❌ Error enviando factura: ${errorMessage}`);
     } finally {
       setIsSubmitting(false)
+      console.log('[INVOICE-FORM] Proceso de envío finalizado');
     }
   }
 
@@ -356,21 +462,47 @@ export default function SiigoInvoiceForm() {
               <Label htmlFor="invoice-date">
                 Fecha de Factura <span className="text-red-500">*</span>
               </Label>
-              <Input id="invoice-date" type="date" required />
+              <Input 
+                id="invoice-date" 
+                type="date" 
+                value={invoiceDate}
+                onChange={(e) => setInvoiceDate(e.target.value)}
+                required 
+              />
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="voucher-number">Número de Comprobante</Label>
-              <Input id="voucher-number" placeholder="Número del comprobante" />
+              <Label htmlFor="cost-center">Centro de Costo</Label>
+              <Input 
+                id="cost-center" 
+                placeholder="ID del centro de costo (opcional)"
+                value={costCenter}
+                onChange={(e) => setCostCenter(e.target.value)}
+                type="number"
+              />
             </div>
 
             <div className="space-y-2">
               <Autocomplete
-                label="Código/Proveedor"
+                label="Código"
                 placeholder="Buscar por código o nombre del proveedor..."
                 apiEndpoint="/api/proveedores"
-                value={selectedProvider ? `${selectedProvider.codigo} - ${selectedProvider.nombre}` : ""}
+                value={providerCode}
                 onSelect={handleProviderSelect}
+                required
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="provider-identification">
+                Identificación <span className="text-red-500">*</span>
+              </Label>
+              <Input
+                id="provider-identification"
+                value={providerIdentification}
+                placeholder="Se llenará automáticamente al seleccionar código"
+                readOnly
+                className="bg-muted"
                 required
               />
             </div>
@@ -400,6 +532,21 @@ export default function SiigoInvoiceForm() {
                   <SelectItem value="EUR">🇪🇺 Euro (EUR)</SelectItem>
                 </SelectContent>
               </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="observations">Observaciones</Label>
+              <Textarea
+                id="observations"
+                placeholder="Comentarios adicionales sobre la factura..."
+                value={observations}
+                onChange={(e) => setObservations(e.target.value)}
+                className="min-h-[80px]"
+                maxLength={4000}
+              />
+              <p className="text-xs text-muted-foreground">
+                {observations.length}/4000 caracteres
+              </p>
             </div>
 
             <div className="space-y-2 md:col-span-2 lg:col-span-3">
@@ -443,35 +590,71 @@ export default function SiigoInvoiceForm() {
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                   <div className="space-y-2">
                     <Label>Tipo de Item</Label>
-                    <Select value={item.type} onValueChange={(value: any) => updateItem(item.id, "type", value)}>
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="product">🛍️ Producto</SelectItem>
-                        <SelectItem value="service">🔧 Servicio</SelectItem>
-                        <SelectItem value="charge">💰 Cargo</SelectItem>
-                        <SelectItem value="discount">🏷️ Descuento</SelectItem>
-                      </SelectContent>
-                    </Select>
+                    <Select value={item.type} onValueChange={(value) => updateItem(item.id, "type", value as InvoiceItem["type"])}>
+  <SelectTrigger>
+    <SelectValue />
+  </SelectTrigger>
+  <SelectContent>
+    <SelectItem value="product">🛍️ Producto</SelectItem>
+    <SelectItem value="activos_fijos">🏢 Activo Fijo</SelectItem>
+    <SelectItem value="charge">💼 Cuenta contable</SelectItem>
+  </SelectContent>
+</Select>
                   </div>
 
                   <div className="space-y-2">
-                    <Autocomplete
-                      label="Código Producto/Nombre"
-                      placeholder="Buscar producto por código o nombre..."
-                      apiEndpoint="/api/productos"
-                      value={item.code ? `${item.code} - ${item.description}` : ""}
-                      onSelect={(product) => handleProductSelect(item.id, product)}
-                    />
+                    {item.type === "product" && (
+  <Autocomplete
+    label="Código Producto"
+    placeholder="Buscar producto por código o nombre..."
+    apiEndpoint="/api/productos"
+    value={item.code}
+    onSelect={(option) => {
+      updateItem(item.id, "code", option.codigo);
+      updateItem(item.id, "description", option.nombre);
+      if (option.precio_base !== undefined) updateItem(item.id, "price", option.precio_base);
+      if (option.tiene_iva !== undefined) updateItem(item.id, "hasIVA", option.tiene_iva);
+    }}
+    onInputChange={(code: string) => handleProductCodeChange(item.id, code)}
+    required
+  />
+)}
+{item.type === "activos_fijos" && (
+  <Autocomplete
+    label="Código Activo Fijo"
+    placeholder="Buscar activo por código o nombre..."
+    apiEndpoint="/api/activos-fijos"
+    value={item.code}
+    onSelect={(option) => {
+      updateItem(item.id, "code", option.codigo);
+      updateItem(item.id, "description", option.nombre);
+    }}
+    required
+    readOnlyInput
+  />
+)}
+{item.type === "charge" && (
+  <Autocomplete
+    label="Cuenta contable"
+    placeholder="Buscar por código o nombre de cuenta..."
+    apiEndpoint="/api/gastos_cuentas_contables"
+    value={item.code}
+    onSelect={(cuenta) => {
+      updateItem(item.id, "code", cuenta.codigo);
+      updateItem(item.id, "description", cuenta.nombre);
+    }}
+    readOnlyInput
+  />
+) }
                   </div>
 
                   <div className="space-y-2">
-                    <Label>Descripción</Label>
+                    <Label>Nombre</Label>
                     <Input
                       value={item.description}
-                      onChange={(e) => updateItem(item.id, "description", e.target.value)}
-                      placeholder="Descripción del item"
+                      placeholder="Se llenará automáticamente al seleccionar código"
+                      readOnly
+                      className="bg-muted"
                     />
                   </div>
 

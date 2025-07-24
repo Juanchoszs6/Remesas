@@ -1,7 +1,7 @@
 // Tipos para el formulario de facturación
 export interface InvoiceItem {
   id: string;
-  type: "product" | "service" | "charge" | "discount";
+  type: "product" | "service" | "charge" | "discount" | "activos_fijos";
   code: string;
   description: string;
   quantity: number;
@@ -46,6 +46,63 @@ export interface SiigoResponse {
   message: string;
 }
 
+// Respuesta de la API de Siigo para facturas de compra
+export interface SiigoPurchaseInvoiceResponse {
+  id: string;
+  document: {
+    id: number;
+  };
+  number: number;
+  name: string;
+  date: string;
+  supplier: {
+    identification: string;
+    branch_office: number;
+  };
+  cost_center?: number;
+  provider_invoice?: {
+    prefix?: string;
+    number?: string;
+  };
+  discount_type?: "Value" | "Percentage";
+  currency?: {
+    code: string;
+    exchange_rate: number;
+  };
+  total: number;
+  balance: number;
+  observations?: string;
+  items: SiigoPurchaseItemResponse[];
+  payments: SiigoPaymentResponse[];
+  metadata: {
+    created: string;
+    last_updated?: string;
+  };
+}
+
+// Respuesta de items para facturas de compra
+export interface SiigoPurchaseItemResponse {
+  type: "Product" | "FixedAsset" | "Account";
+  id: string;
+  code: string;
+  description: string;
+  quantity: number;
+  price: number;
+  discount?: {
+    percentage?: number;
+    value?: number;
+  };
+  taxes?: {
+    id: number;
+    name: string;
+    type: string;
+    percentage: number;
+    value: number;
+  }[];
+  total: number;
+}
+
+// Respuesta de la API de Siigo para facturas de venta (mantener para compatibilidad)
 export interface SiigoInvoiceResponse {
   id: string;
   document: {
@@ -95,7 +152,36 @@ export interface SiigoPaymentResponse {
   due_date?: string;
 }
 
-// Tipos para la petición a Siigo
+// Tipos para la petición a Siigo - Factura de Compra
+export interface SiigoPurchaseInvoiceRequest {
+  document: {
+    id: number;
+  };
+  date: string;
+  number?: number;
+  supplier: {
+    identification: string;
+    branch_office: number;
+  };
+  cost_center?: number;
+  provider_invoice?: {
+    prefix?: string;
+    number?: string;
+  };
+  currency?: {
+    code: string;
+    exchange_rate: number;
+  };
+  observations?: string;
+  discount_type?: "Value" | "Percentage";
+  supplier_by_item?: boolean;
+  tax_included?: boolean;
+  retentions?: number[];
+  items: SiigoPurchaseItemRequest[];
+  payments: SiigoPaymentRequest[];
+}
+
+// Tipos para la petición a Siigo - Factura de Venta (mantener para compatibilidad)
 export interface SiigoInvoiceRequest {
   document: {
     id: number;
@@ -118,6 +204,22 @@ export interface SiigoInvoiceRequest {
   payments: SiigoPaymentRequest[];
 }
 
+// Tipos para items de factura de compra
+export interface SiigoPurchaseItemRequest {
+  type: "Product" | "FixedAsset" | "Account";
+  code: string;
+  description?: string;
+  quantity: number;
+  price: number;
+  discount?: number;
+  supplier?: number;
+  warehouse?: number;
+  taxes?: {
+    id: number;
+  }[];
+}
+
+// Tipos para items de factura de venta (mantener para compatibilidad)
 export interface SiigoInvoiceItemRequest {
   code: string;
   description: string;

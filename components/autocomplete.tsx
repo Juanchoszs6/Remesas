@@ -20,40 +20,52 @@ interface AutocompleteProps {
   apiEndpoint: string
   value: string
   onSelect: (option: AutocompleteOption) => void
+  onInputChange?: (value: string) => void // callback for manual input changes
   required?: boolean
+  readOnlyInput?: boolean // disables manual typing, only allows dropdown selection
 }
 
-export function Autocomplete({ label, placeholder, apiEndpoint, value, onSelect, required }: AutocompleteProps) {
+export function Autocomplete({ label, placeholder, apiEndpoint, value, onSelect, onInputChange, required, readOnlyInput = false }: AutocompleteProps) {
   const [query, setQuery] = useState(value)
   const [options, setOptions] = useState<AutocompleteOption[]>([])
+  const [allOptions, setAllOptions] = useState<AutocompleteOption[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [showOptions, setShowOptions] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
   const optionsRef = useRef<HTMLDivElement>(null)
 
+  // Fetch all options for readOnlyInput, or filtered for normal input
   useEffect(() => {
     const fetchOptions = async () => {
-      if (query.length < 2) {
-        setOptions([])
-        return
-      }
-
       setIsLoading(true)
       try {
-        const response = await fetch(`${apiEndpoint}?q=${encodeURIComponent(query)}`)
+        const url = readOnlyInput ? `${apiEndpoint}` : `${apiEndpoint}?q=${encodeURIComponent(query)}`;
+        const response = await fetch(url)
         const data = await response.json()
-        setOptions(data)
+        setAllOptions(data)
+        // For readOnlyInput, show all; for normal, filter by query
+        if (readOnlyInput) {
+          setOptions(data)
+        } else {
+          setOptions(data)
+        }
       } catch (error) {
         console.error("Error fetching options:", error)
         setOptions([])
+        setAllOptions([])
       } finally {
         setIsLoading(false)
       }
     }
-
-    const debounceTimer = setTimeout(fetchOptions, 300)
-    return () => clearTimeout(debounceTimer)
-  }, [query, apiEndpoint])
+    if (readOnlyInput) {
+      // Always fetch all options on mount or endpoint change
+      fetchOptions()
+    } else {
+      // Debounce for user typing
+      const debounceTimer = setTimeout(fetchOptions, 300)
+      return () => clearTimeout(debounceTimer)
+    }
+  }, [query, apiEndpoint, readOnlyInput])
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -71,13 +83,18 @@ export function Autocomplete({ label, placeholder, apiEndpoint, value, onSelect,
   }, [])
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (readOnlyInput) return // ignore typing if readonly
     const newValue = e.target.value
     setQuery(newValue)
     setShowOptions(true)
+    // Call the onInputChange callback if provided
+    if (onInputChange) {
+      onInputChange(newValue)
+    }
   }
 
   const handleOptionSelect = (option: AutocompleteOption) => {
-    setQuery(`${option.codigo} - ${option.nombre}`)
+    setQuery(option.codigo)
     setShowOptions(false)
     onSelect(option)
   }
@@ -92,9 +109,22 @@ export function Autocomplete({ label, placeholder, apiEndpoint, value, onSelect,
           ref={inputRef}
           value={query}
           onChange={handleInputChange}
-          onFocus={() => setShowOptions(true)}
+          onFocus={() => {
+            setShowOptions(true);
+            if (readOnlyInput) {
+              setOptions(allOptions);
+            }
+          }}
+          onClick={() => {
+            setShowOptions(true);
+            if (readOnlyInput) {
+              setOptions(allOptions);
+            }
+          }}
           placeholder={placeholder}
           required={required}
+          readOnly={readOnlyInput}
+          style={readOnlyInput ? { cursor: 'pointer', background: '#f3f4f6' } : undefined}
         />
         {isLoading && (
           <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
@@ -114,7 +144,7 @@ export function Autocomplete({ label, placeholder, apiEndpoint, value, onSelect,
               >
                 <div className="font-medium text-sm">{option.codigo}</div>
                 <div className="text-xs text-muted-foreground">{option.nombre}</div>
-                {option.precio_base && (
+                {option.precio_base !== undefined && (
                   <div className="text-xs text-green-600">${option.precio_base.toLocaleString("es-CO")} COP</div>
                 )}
               </div>
@@ -123,7 +153,7 @@ export function Autocomplete({ label, placeholder, apiEndpoint, value, onSelect,
         </Card>
       )}
 
-      {showOptions && query.length >= 2 && options.length === 0 && !isLoading && (
+      {showOptions && query.length >= 1 && options.length === 0 && !isLoading && (
         <Card ref={optionsRef} className="absolute z-50 w-full border shadow-lg">
           <div className="p-3 text-sm text-muted-foreground text-center">
             No se encontraron resultados para "{query}"
