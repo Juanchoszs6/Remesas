@@ -41,7 +41,30 @@ export async function GET(req: NextRequest) {
     const result = await pool.query(sqlQuery, values);
     return NextResponse.json(result.rows);
   } catch (error) {
-    console.error('Error al consultar productos:', error);
+    console.error('Error al consultar tabla productos (sin guión bajo):', error);
     return NextResponse.json({ error: 'Error al consultar productos' }, { status: 500 });
+  }
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    const { codigo_prod, nombre_prod } = await req.json();
+
+    if (!codigo_prod || !nombre_prod) {
+      return NextResponse.json(
+        { error: 'Código y nombre son requeridos' },
+        { status: 400 }
+      );
+    }
+
+    const result = await pool.query(
+      'INSERT INTO productos (codigo_prod, nombre_prod) VALUES ($1, $2) RETURNING *',
+      [codigo_prod, nombre_prod]
+    );
+
+    return NextResponse.json(result.rows[0], { status: 201 });
+  } catch (error) {
+    console.error('Error al insertar en tabla productos (sin guión bajo):', error);
+    return NextResponse.json({ error: 'Error al crear producto' }, { status: 500 });
   }
 }

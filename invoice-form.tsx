@@ -471,16 +471,7 @@ export default function SiigoInvoiceForm() {
               />
             </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="cost-center">Centro de Costo</Label>
-              <Input 
-                id="cost-center" 
-                placeholder="ID del centro de costo (opcional)"
-                value={costCenter}
-                onChange={(e) => setCostCenter(e.target.value)}
-                type="number"
-              />
-            </div>
+
 
             <div className="space-y-2">
               <Autocomplete
@@ -549,14 +540,7 @@ export default function SiigoInvoiceForm() {
               </p>
             </div>
 
-            <div className="space-y-2 md:col-span-2 lg:col-span-3">
-              <Label htmlFor="observations">Observaciones de Factura</Label>
-              <Textarea
-                id="observations"
-                placeholder="Observaciones adicionales sobre la factura"
-                className="min-h-[80px]"
-              />
-            </div>
+
           </CardContent>
         </Card>
 
@@ -607,15 +591,12 @@ export default function SiigoInvoiceForm() {
   <Autocomplete
     label="Código Producto"
     placeholder="Buscar producto por código o nombre..."
-    apiEndpoint="/api/productos"
+    apiEndpoint="/api/productos-sin-guion"
     value={item.code}
     onSelect={(option) => {
       updateItem(item.id, "code", option.codigo);
       updateItem(item.id, "description", option.nombre);
-      if (option.precio_base !== undefined) updateItem(item.id, "price", option.precio_base);
-      if (option.tiene_iva !== undefined) updateItem(item.id, "hasIVA", option.tiene_iva);
     }}
-    onInputChange={(code: string) => handleProductCodeChange(item.id, code)}
     required
   />
 )}

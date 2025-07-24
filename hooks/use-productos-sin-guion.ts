@@ -1,20 +1,20 @@
 import { useEffect, useState } from 'react';
 
-export interface ProductoLista {
+export interface ProductoSinGuion {
   codigo: string;
   nombre: string;
 }
 
-export function useProductosLista() {
-  const [data, setData] = useState<ProductoLista[]>([]);
+export function useProductosSinGuion() {
+  const [data, setData] = useState<ProductoSinGuion[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     setLoading(true);
-    fetch('/api/productos-lista')
+    fetch('/api/productos-sin-guion')
       .then(res => {
-        if (!res.ok) throw new Error('Error al obtener productos lista');
+        if (!res.ok) throw new Error('Error al obtener productos sin guión');
         return res.json();
       })
       .then(setData)
