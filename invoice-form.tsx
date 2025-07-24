@@ -617,16 +617,24 @@ export default function SiigoInvoiceForm() {
 {item.type === "charge" && (
   <Autocomplete
     label="Cuenta contable"
-    placeholder="Buscar por código o nombre de cuenta..."
+    placeholder="Escribe código o nombre de cuenta..."
     apiEndpoint="/api/gastos_cuentas_contables"
     value={item.code}
     onSelect={(cuenta) => {
       updateItem(item.id, "code", cuenta.codigo);
       updateItem(item.id, "description", cuenta.nombre);
     }}
-    
+    onInputChange={(code) => {
+      // Opcional: limpiar descripción mientras escribe
+      updateItem(item.id, "code", code);
+      if (!code) {
+        updateItem(item.id, "description", "");
+      }
+    }}
+    required
+    // 👈 ELIMINAR readOnlyInput={true} para permitir escritura
   />
-) }
+)}
                   </div>
 
                   <div className="space-y-2">

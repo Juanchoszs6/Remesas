@@ -25,7 +25,16 @@ interface AutocompleteProps {
   readOnlyInput?: boolean // disables manual typing, only allows dropdown selection
 }
 
-export function Autocomplete({ label, placeholder, apiEndpoint, value, onSelect, onInputChange, required, readOnlyInput = false }: AutocompleteProps) {
+export function Autocomplete({
+  label,
+  placeholder,
+  apiEndpoint,
+  value,
+  onSelect,
+  onInputChange,
+  required,
+  readOnlyInput = false
+}: AutocompleteProps) {
   const [query, setQuery] = useState(value)
   const [options, setOptions] = useState<AutocompleteOption[]>([])
   const [allOptions, setAllOptions] = useState<AutocompleteOption[]>([])
@@ -39,14 +48,24 @@ export function Autocomplete({ label, placeholder, apiEndpoint, value, onSelect,
     const fetchOptions = async () => {
       setIsLoading(true)
       try {
-        const url = readOnlyInput ? `${apiEndpoint}` : `${apiEndpoint}?q=${encodeURIComponent(query)}`;
+        const url = readOnlyInput ? `${apiEndpoint}` : `${apiEndpoint}?q=${encodeURIComponent(query)}`
         const response = await fetch(url)
         const data = await response.json()
         setAllOptions(data)
-        // For readOnlyInput, show all; for normal, filter by query
+
         if (readOnlyInput) {
-          setOptions(data)
+          if (query.trim() === '') {
+            setOptions(data)
+          } else {
+            const filtered = data.filter(
+              (option: AutocompleteOption) =>
+                option.codigo.toLowerCase().includes(query.toLowerCase()) ||
+                option.nombre.toLowerCase().includes(query.toLowerCase())
+            )
+            setOptions(filtered)
+          }
         } else {
+          // En modo normal, API ya devuelve filtrado
           setOptions(data)
         }
       } catch (error) {
@@ -57,11 +76,10 @@ export function Autocomplete({ label, placeholder, apiEndpoint, value, onSelect,
         setIsLoading(false)
       }
     }
+
     if (readOnlyInput) {
-      // Always fetch all options on mount or endpoint change
       fetchOptions()
     } else {
-      // Debounce for user typing
       const debounceTimer = setTimeout(fetchOptions, 300)
       return () => clearTimeout(debounceTimer)
     }
@@ -87,7 +105,6 @@ export function Autocomplete({ label, placeholder, apiEndpoint, value, onSelect,
     const newValue = e.target.value
     setQuery(newValue)
     setShowOptions(true)
-    // Call the onInputChange callback if provided
     if (onInputChange) {
       onInputChange(newValue)
     }
@@ -110,15 +127,25 @@ export function Autocomplete({ label, placeholder, apiEndpoint, value, onSelect,
           value={query}
           onChange={handleInputChange}
           onFocus={() => {
-            setShowOptions(true);
+            setShowOptions(true)
             if (readOnlyInput) {
-              setOptions(allOptions);
+              const filtered = allOptions.filter(
+                (option: AutocompleteOption) =>
+                  option.codigo.toLowerCase().includes(query.toLowerCase()) ||
+                  option.nombre.toLowerCase().includes(query.toLowerCase())
+              )
+              setOptions(filtered)
             }
           }}
           onClick={() => {
-            setShowOptions(true);
+            setShowOptions(true)
             if (readOnlyInput) {
-              setOptions(allOptions);
+              const filtered = allOptions.filter(
+                (option: AutocompleteOption) =>
+                  option.codigo.toLowerCase().includes(query.toLowerCase()) ||
+                  option.nombre.toLowerCase().includes(query.toLowerCase())
+              )
+              setOptions(filtered)
             }
           }}
           placeholder={placeholder}
@@ -145,7 +172,9 @@ export function Autocomplete({ label, placeholder, apiEndpoint, value, onSelect,
                 <div className="font-medium text-sm">{option.codigo}</div>
                 <div className="text-xs text-muted-foreground">{option.nombre}</div>
                 {option.precio_base !== undefined && (
-                  <div className="text-xs text-green-600">${option.precio_base.toLocaleString("es-CO")} COP</div>
+                  <div className="text-xs text-green-600">
+                    ${option.precio_base.toLocaleString("es-CO")} COP
+                  </div>
                 )}
               </div>
             ))}
