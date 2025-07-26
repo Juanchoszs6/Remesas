@@ -1,14 +1,13 @@
 import { redirect } from 'next/navigation';
 import { getCurrentUser } from '@/lib/auth';
+import DashboardContent from '@/components/dashboard/DashboardContent';
 
-export default async function Page() {
+export default async function DashboardPage() {
   const user = await getCurrentUser();
   
   if (!user) {
-    // Si no hay usuario autenticado, redirigir al login
     redirect('/login');
   }
   
-  // Si hay usuario autenticado, redirigir al dashboard
-  redirect('/dashboard');
+  return <DashboardContent user={user} />;
 }
