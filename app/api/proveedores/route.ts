@@ -9,42 +9,78 @@ const pool = new Pool({
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const query = searchParams.get('q') || '';
+  const page = parseInt(searchParams.get('page') || '1');
+  const limit = parseInt(searchParams.get('limit') || '50');
+  const offset = (page - 1) * limit;
 
   let sqlQuery = '';
+  let countQuery = '';
   let values: any[] = [];
+  let countValues: any[] = [];
 
   if (query.trim() === '') {
-    // Sin parámetro de búsqueda → devolver TODOS los proveedores
+    // Sin parámetro de búsqueda → devolver proveedores con paginación
     sqlQuery = `
       SELECT codigo, nombre 
       FROM proveedores 
       ORDER BY nombre
+      LIMIT $1 OFFSET $2
     `;
-    values = [];
+    values = [limit, offset];
+    
+    countQuery = `SELECT COUNT(*) as total FROM proveedores`;
+    countValues = [];
   } else if (/^\d/.test(query)) {
-    // Empieza con número → buscar por código (sin límite)
+    // Empieza con número → buscar por código con paginación
     sqlQuery = `
       SELECT codigo, nombre 
       FROM proveedores 
       WHERE codigo ILIKE $1
       ORDER BY codigo
+      LIMIT $2 OFFSET $3
     `;
-    values = [`${query}%`];
+    values = [`${query}%`, limit, offset];
+    
+    countQuery = `SELECT COUNT(*) as total FROM proveedores WHERE codigo ILIKE $1`;
+    countValues = [`${query}%`];
   } else {
-    // Empieza con letra → buscar por nombre (sin límite)
+    // Empieza con letra → buscar por nombre con paginación
     sqlQuery = `
       SELECT codigo, nombre 
       FROM proveedores 
       WHERE nombre ILIKE $1
       ORDER BY nombre
+      LIMIT $2 OFFSET $3
     `;
-    values = [`${query}%`];
+    values = [`${query}%`, limit, offset];
+    
+    countQuery = `SELECT COUNT(*) as total FROM proveedores WHERE nombre ILIKE $1`;
+    countValues = [`${query}%`];
   }
 
   try {
-    const result = await pool.query(sqlQuery, values);
-    console.log(`[PROVEEDORES API] Query: "${query}" - Resultados: ${result.rows.length}`);
-    return NextResponse.json(result.rows);
+    // Ejecutar ambas consultas en paralelo
+    const [result, countResult] = await Promise.all([
+      pool.query(sqlQuery, values),
+      pool.query(countQuery, countValues)
+    ]);
+    
+    const total = parseInt(countResult.rows[0].total);
+    const totalPages = Math.ceil(total / limit);
+    
+    console.log(`[PROVEEDORES API] Query: "${query}" - Página: ${page}/${totalPages} - Resultados: ${result.rows.length}/${total}`);
+    
+    return NextResponse.json({
+      data: result.rows,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages,
+        hasNext: page < totalPages,
+        hasPrev: page > 1
+      }
+    });
   } catch (error) {
     console.error('Error al consultar proveedores:', error);
     return new NextResponse('Error al consultar proveedores', { status: 500 });

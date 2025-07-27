@@ -36,6 +36,10 @@ export interface FormData {
   hasIVA: boolean;
   ivaPercentage: number;
   observations?: string;
+  invoiceDate?: string;
+  costCenter?: string;
+  providerInvoicePrefix?: string;
+  providerInvoiceNumber?: string;
 }
 
 // Tipos para la respuesta de la API de Siigo
@@ -225,9 +229,11 @@ export interface SiigoInvoiceItemRequest {
   description: string;
   quantity: number;
   price: number;
+  discount?: number;
   warehouse?: number;
-  taxes: {
+  taxes?: {
     id: number;
+    value?: number;
   }[];
 }
 
@@ -246,4 +252,48 @@ export interface SiigoAuthResponse {
 export interface SiigoAuthRequest {
   username: string;
   access_key: string;
+}
+
+// Tipo simplificado para factura de compra
+export interface SiigoPurchaseRequest {
+  document: {
+    id: number;
+  };
+  date: string;
+  supplier: {
+    identification: string;
+    branch_office: number;
+  };
+  number?: number;
+  cost_center?: number;
+  observations?: string;
+  items: SiigoInvoiceItemRequest[];
+  payments: SiigoPaymentRequest[];
+  additional_fields?: {
+    warehouse?: string;
+    prefix?: string;
+  };
+}
+
+// Tipo para gastos/egresos
+export interface SiigoExpenseRequest {
+  document: {
+    id: number;
+  };
+  date: string;
+  supplier: {
+    identification: string;
+    branch_office: number;
+  };
+  category: string;
+  description: string;
+  amount: number;
+  tax_included: boolean;
+  cost_center?: number;
+  observations?: string;
+  payment: {
+    id: number;
+    value: number;
+    due_date: string;
+  };
 }

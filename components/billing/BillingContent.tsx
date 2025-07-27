@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { User } from '@/lib/db';
 import { Button } from '@/components/ui/button';
@@ -8,16 +8,126 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
-import { LogOut, FileText, DollarSign, Users, BarChart3, Settings, ArrowLeft, Shield } from 'lucide-react';
+import { Progress } from '@/components/ui/progress';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { 
+  LogOut, 
+  FileText, 
+  DollarSign, 
+  Users, 
+  BarChart3, 
+  ArrowLeft, 
+  Shield, 
+  TrendingUp, 
+  TrendingDown,
+  Calendar,
+  Package,
+  AlertCircle,
+  CheckCircle,
+  Clock,
+  RefreshCw,
+  Download,
+  Filter
+} from 'lucide-react';
 import { toast } from 'sonner';
 
 interface BillingContentProps {
   user: User;
 }
 
+interface InvoiceAnalytics {
+  totalInvoices: number;
+  totalAmount: number;
+  averageAmount: number;
+  monthlyGrowth: number;
+  topSuppliers: Array<{
+    name: string;
+    identification: string;
+    totalAmount: number;
+    invoiceCount: number;
+  }>;
+  monthlyData: Array<{
+    month: string;
+    amount: number;
+    count: number;
+  }>;
+  categoryBreakdown: Array<{
+    category: string;
+    amount: number;
+    percentage: number;
+  }>;
+  recentInvoices: Array<{
+    id: string;
+    date: string;
+    supplier: string;
+    amount: number;
+    status: 'success' | 'pending' | 'error';
+    type: 'purchase' | 'expense';
+  }>;
+}
+
 export default function BillingContent({ user }: BillingContentProps) {
   const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const [analytics, setAnalytics] = useState<InvoiceAnalytics | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [selectedPeriod, setSelectedPeriod] = useState('6m');
   const router = useRouter();
+
+  // Función para cargar datos de analytics desde SIIGO
+  const loadAnalytics = async () => {
+    setIsLoading(true);
+    try {
+      console.log('🔍 Cargando analytics de facturas SIIGO...');
+      
+      // Simular datos de analytics (en producción, esto vendría de SIIGO API)
+      const mockAnalytics: InvoiceAnalytics = {
+        totalInvoices: 156,
+        totalAmount: 45678900,
+        averageAmount: 292814,
+        monthlyGrowth: 12.5,
+        topSuppliers: [
+          { name: 'Proveedor ABC S.A.S', identification: '900123456', totalAmount: 8500000, invoiceCount: 23 },
+          { name: 'Servicios XYZ Ltda', identification: '800987654', totalAmount: 6200000, invoiceCount: 18 },
+          { name: 'Materiales DEF', identification: '900555444', totalAmount: 4800000, invoiceCount: 15 },
+          { name: 'Tecnología GHI', identification: '800333222', totalAmount: 3900000, invoiceCount: 12 },
+          { name: 'Suministros JKL', identification: '900777888', totalAmount: 2700000, invoiceCount: 8 }
+        ],
+        monthlyData: [
+          { month: 'Ene', amount: 3200000, count: 12 },
+          { month: 'Feb', amount: 4100000, count: 15 },
+          { month: 'Mar', amount: 3800000, count: 14 },
+          { month: 'Abr', amount: 5200000, count: 19 },
+          { month: 'May', amount: 4900000, count: 17 },
+          { month: 'Jun', amount: 6100000, count: 22 }
+        ],
+        categoryBreakdown: [
+          { category: 'Servicios Profesionales', amount: 15200000, percentage: 33.3 },
+          { category: 'Materiales y Suministros', amount: 12800000, percentage: 28.0 },
+          { category: 'Tecnología y Software', amount: 8900000, percentage: 19.5 },
+          { category: 'Servicios Públicos', amount: 5400000, percentage: 11.8 },
+          { category: 'Otros Gastos', amount: 3378900, percentage: 7.4 }
+        ],
+        recentInvoices: [
+          { id: 'INV-2024-001', date: '2024-01-26', supplier: 'Proveedor ABC S.A.S', amount: 1250000, status: 'success', type: 'purchase' },
+          { id: 'EXP-2024-002', date: '2024-01-25', supplier: 'Servicios XYZ Ltda', amount: 850000, status: 'success', type: 'expense' },
+          { id: 'INV-2024-003', date: '2024-01-24', supplier: 'Materiales DEF', amount: 2100000, status: 'pending', type: 'purchase' },
+          { id: 'EXP-2024-004', date: '2024-01-23', supplier: 'Tecnología GHI', amount: 450000, status: 'success', type: 'expense' },
+          { id: 'INV-2024-005', date: '2024-01-22', supplier: 'Suministros JKL', amount: 750000, status: 'error', type: 'purchase' }
+        ]
+      };
+      
+      // Simular delay de carga
+      await new Promise(resolve => setTimeout(resolve, 1500));
+      
+      setAnalytics(mockAnalytics);
+      toast.success('Analytics cargados exitosamente');
+    } catch (error) {
+      console.error('Error al cargar analytics:', error);
+      toast.error('Error al cargar los datos de analytics');
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const handleLogout = async () => {
     setIsLoggingOut(true);
@@ -42,6 +152,11 @@ export default function BillingContent({ user }: BillingContentProps) {
     }
   };
 
+  // Cargar analytics al montar el componente
+  useEffect(() => {
+    loadAnalytics();
+  }, [selectedPeriod]);
+
   const userInitials = user.email.charAt(0).toUpperCase();
 
   return (
@@ -62,7 +177,7 @@ export default function BillingContent({ user }: BillingContentProps) {
               </Button>
               <Separator orientation="vertical" className="h-6" />
               <h1 className="text-2xl font-bold text-gray-900">
-                Sistema de Facturación SIIGO
+                Analytics SIIGO - Panel de Facturación
               </h1>
               <Badge variant="destructive" className="flex items-center space-x-1">
                 <Shield className="h-3 w-3" />
@@ -96,187 +211,335 @@ export default function BillingContent({ user }: BillingContentProps) {
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         
-        {/* Security Notice */}
-        <Card className="mb-6 border-green-200 bg-green-50">
-          <CardContent className="pt-6">
-            <div className="flex items-center space-x-3">
-              <Shield className="h-6 w-6 text-green-600" />
-              <div>
-                <h3 className="font-semibold text-green-900">Área Protegida por Autenticación</h3>
-                <p className="text-green-700 text-sm">
-                  Esta página está protegida por el middleware de autenticación. 
-                  Solo usuarios autenticados pueden acceder a esta sección de facturación.
-                </p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Billing Dashboard Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-          
-          {/* Revenue Card */}
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">
-                Ingresos Totales
-              </CardTitle>
-              <DollarSign className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">$45,231.89</div>
-              <p className="text-xs text-muted-foreground">
-                +20.1% desde el mes pasado
-              </p>
-            </CardContent>
-          </Card>
-
-          {/* Invoices Card */}
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">
-                Facturas Emitidas
-              </CardTitle>
-              <FileText className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">+2350</div>
-              <p className="text-xs text-muted-foreground">
-                +180.1% desde el mes pasado
-              </p>
-            </CardContent>
-          </Card>
-
-          {/* Clients Card */}
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">
-                Clientes Activos
-              </CardTitle>
-              <Users className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">+12,234</div>
-              <p className="text-xs text-muted-foreground">
-                +19% desde el mes pasado
-              </p>
-            </CardContent>
-          </Card>
-
-          {/* Growth Card */}
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">
-                Crecimiento
-              </CardTitle>
-              <BarChart3 className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">+573</div>
-              <p className="text-xs text-muted-foreground">
-                +201 desde la semana pasada
-              </p>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Main Content Grid */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          
-          {/* Billing Actions */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center space-x-2">
-                <FileText className="h-5 w-5" />
-                <span>Acciones de Facturación</span>
-              </CardTitle>
-              <CardDescription>
-                Gestiona tus facturas y procesos de facturación
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <Button className="w-full justify-start" size="lg">
-                <FileText className="h-4 w-4 mr-2" />
-                Crear Nueva Factura
-              </Button>
-              <Button className="w-full justify-start" variant="outline" size="lg">
-                <BarChart3 className="h-4 w-4 mr-2" />
-                Ver Reportes de Facturación
-              </Button>
-              <Button className="w-full justify-start" variant="outline" size="lg">
-                <Users className="h-4 w-4 mr-2" />
-                Gestionar Clientes
-              </Button>
-              <Button className="w-full justify-start" variant="outline" size="lg">
-                <Settings className="h-4 w-4 mr-2" />
-                Configuración de Facturación
-              </Button>
-            </CardContent>
-          </Card>
-
-          {/* Recent Activity */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Actividad Reciente</CardTitle>
-              <CardDescription>
-                Últimas transacciones y actividades del sistema
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-4">
-                <div className="flex items-center space-x-4">
-                  <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-                  <div className="flex-1">
-                    <p className="text-sm font-medium">Factura #INV-001 creada</p>
-                    <p className="text-xs text-gray-500">Hace 2 minutos</p>
-                  </div>
-                  <Badge variant="secondary">$1,234.56</Badge>
-                </div>
-                <div className="flex items-center space-x-4">
-                  <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
-                  <div className="flex-1">
-                    <p className="text-sm font-medium">Pago recibido de Cliente ABC</p>
-                    <p className="text-xs text-gray-500">Hace 15 minutos</p>
-                  </div>
-                  <Badge variant="secondary">$2,500.00</Badge>
-                </div>
-                <div className="flex items-center space-x-4">
-                  <div className="w-2 h-2 bg-yellow-500 rounded-full"></div>
-                  <div className="flex-1">
-                    <p className="text-sm font-medium">Factura #INV-002 pendiente</p>
-                    <p className="text-xs text-gray-500">Hace 1 hora</p>
-                  </div>
-                  <Badge variant="outline">$890.00</Badge>
-                </div>
-                <div className="flex items-center space-x-4">
-                  <div className="w-2 h-2 bg-purple-500 rounded-full"></div>
-                  <div className="flex-1">
-                    <p className="text-sm font-medium">Nuevo cliente registrado</p>
-                    <p className="text-xs text-gray-500">Hace 2 horas</p>
-                  </div>
-                  <Badge variant="secondary">Cliente XYZ</Badge>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Authentication Info */}
-        <Card className="mt-6">
-          <CardContent className="pt-6">
+        {/* Loading State */}
+        {isLoading ? (
+          <div className="flex items-center justify-center min-h-[400px]">
             <div className="text-center">
-              <h2 className="text-xl font-semibold text-gray-900 mb-2">
-                🔒 Sistema de Facturación Protegido
-              </h2>
-              <p className="text-gray-600 max-w-3xl mx-auto">
-                Esta página está completamente protegida por el sistema de autenticación implementado. 
-                El middleware verifica automáticamente que el usuario esté autenticado antes de permitir 
-                el acceso a esta sección crítica de facturación. Todas las rutas /facturacion, /admin, 
-                /dashboard y /billing están protegidas y requieren login válido.
-              </p>
+              <RefreshCw className="h-8 w-8 animate-spin mx-auto mb-4 text-blue-600" />
+              <h3 className="text-lg font-semibold text-gray-900 mb-2">Cargando Analytics SIIGO</h3>
+              <p className="text-gray-600">Analizando datos de facturas y gastos...</p>
             </div>
-          </CardContent>
-        </Card>
+          </div>
+        ) : analytics ? (
+          <>
+            {/* Controls */}
+            <div className="flex justify-between items-center mb-6">
+              <div className="flex items-center space-x-4">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={loadAnalytics}
+                  className="flex items-center space-x-2"
+                >
+                  <RefreshCw className="h-4 w-4" />
+                  <span>Actualizar</span>
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="flex items-center space-x-2"
+                >
+                  <Download className="h-4 w-4" />
+                  <span>Exportar</span>
+                </Button>
+              </div>
+              <div className="flex items-center space-x-2">
+                <Filter className="h-4 w-4 text-gray-500" />
+                <select 
+                  value={selectedPeriod} 
+                  onChange={(e) => setSelectedPeriod(e.target.value)}
+                  className="border rounded px-3 py-1 text-sm"
+                >
+                  <option value="1m">Último mes</option>
+                  <option value="3m">Últimos 3 meses</option>
+                  <option value="6m">Últimos 6 meses</option>
+                  <option value="1y">Último año</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Key Metrics */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+              
+              {/* Total Amount */}
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                  <CardTitle className="text-sm font-medium">Total Facturado</CardTitle>
+                  <DollarSign className="h-4 w-4 text-muted-foreground" />
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold">
+                    ${analytics.totalAmount.toLocaleString('es-CO')}
+                  </div>
+                  <p className="text-xs text-muted-foreground flex items-center">
+                    <TrendingUp className="h-3 w-3 mr-1 text-green-600" />
+                    +{analytics.monthlyGrowth}% desde el mes pasado
+                  </p>
+                </CardContent>
+              </Card>
+
+              {/* Total Invoices */}
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                  <CardTitle className="text-sm font-medium">Total Facturas</CardTitle>
+                  <FileText className="h-4 w-4 text-muted-foreground" />
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold">{analytics.totalInvoices}</div>
+                  <p className="text-xs text-muted-foreground">
+                    Facturas de compra y gastos
+                  </p>
+                </CardContent>
+              </Card>
+
+              {/* Average Amount */}
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                  <CardTitle className="text-sm font-medium">Promedio por Factura</CardTitle>
+                  <BarChart3 className="h-4 w-4 text-muted-foreground" />
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold">
+                    ${analytics.averageAmount.toLocaleString('es-CO')}
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Valor promedio
+                  </p>
+                </CardContent>
+              </Card>
+
+              {/* Top Suppliers */}
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                  <CardTitle className="text-sm font-medium">Proveedores Activos</CardTitle>
+                  <Users className="h-4 w-4 text-muted-foreground" />
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold">{analytics.topSuppliers.length}</div>
+                  <p className="text-xs text-muted-foreground">
+                    Proveedores principales
+                  </p>
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* Analytics Tabs */}
+            <Tabs defaultValue="overview" className="space-y-6">
+              <TabsList className="grid w-full grid-cols-4">
+                <TabsTrigger value="overview">Resumen</TabsTrigger>
+                <TabsTrigger value="suppliers">Proveedores</TabsTrigger>
+                <TabsTrigger value="categories">Categorías</TabsTrigger>
+                <TabsTrigger value="recent">Recientes</TabsTrigger>
+              </TabsList>
+
+              {/* Overview Tab */}
+              <TabsContent value="overview" className="space-y-6">
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  
+                  {/* Monthly Trend */}
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="flex items-center space-x-2">
+                        <TrendingUp className="h-5 w-5" />
+                        <span>Tendencia Mensual</span>
+                      </CardTitle>
+                      <CardDescription>
+                        Evolución de facturas por mes
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="space-y-4">
+                        {analytics.monthlyData.map((month, index) => (
+                          <div key={index} className="flex items-center justify-between">
+                            <div className="flex items-center space-x-3">
+                              <div className="w-12 text-sm font-medium">{month.month}</div>
+                              <div className="flex-1">
+                                <Progress 
+                                  value={(month.amount / Math.max(...analytics.monthlyData.map(m => m.amount))) * 100} 
+                                  className="h-2"
+                                />
+                              </div>
+                            </div>
+                            <div className="text-right">
+                              <div className="text-sm font-medium">
+                                ${month.amount.toLocaleString('es-CO')}
+                              </div>
+                              <div className="text-xs text-gray-500">
+                                {month.count} facturas
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  {/* Status Distribution */}
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="flex items-center space-x-2">
+                        <Package className="h-5 w-5" />
+                        <span>Estado de Facturas</span>
+                      </CardTitle>
+                      <CardDescription>
+                        Distribución por estado
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="space-y-4">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center space-x-2">
+                            <CheckCircle className="h-4 w-4 text-green-600" />
+                            <span className="text-sm">Exitosas</span>
+                          </div>
+                          <div className="text-right">
+                            <div className="text-sm font-medium">142</div>
+                            <div className="text-xs text-gray-500">91%</div>
+                          </div>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center space-x-2">
+                            <Clock className="h-4 w-4 text-yellow-600" />
+                            <span className="text-sm">Pendientes</span>
+                          </div>
+                          <div className="text-right">
+                            <div className="text-sm font-medium">11</div>
+                            <div className="text-xs text-gray-500">7%</div>
+                          </div>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center space-x-2">
+                            <AlertCircle className="h-4 w-4 text-red-600" />
+                            <span className="text-sm">Con errores</span>
+                          </div>
+                          <div className="text-right">
+                            <div className="text-sm font-medium">3</div>
+                            <div className="text-xs text-gray-500">2%</div>
+                          </div>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                </div>
+              </TabsContent>
+
+              {/* Suppliers Tab */}
+              <TabsContent value="suppliers">
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Top Proveedores</CardTitle>
+                    <CardDescription>
+                      Proveedores con mayor volumen de facturación
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-4">
+                      {analytics.topSuppliers.map((supplier, index) => (
+                        <div key={index} className="flex items-center justify-between p-4 border rounded-lg">
+                          <div className="flex items-center space-x-4">
+                            <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center">
+                              <span className="text-sm font-medium text-blue-600">{index + 1}</span>
+                            </div>
+                            <div>
+                              <div className="font-medium">{supplier.name}</div>
+                              <div className="text-sm text-gray-500">{supplier.identification}</div>
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <div className="font-medium">
+                              ${supplier.totalAmount.toLocaleString('es-CO')}
+                            </div>
+                            <div className="text-sm text-gray-500">
+                              {supplier.invoiceCount} facturas
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+              </TabsContent>
+
+              {/* Categories Tab */}
+              <TabsContent value="categories">
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Análisis por Categorías</CardTitle>
+                    <CardDescription>
+                      Distribución de gastos por categoría
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-4">
+                      {analytics.categoryBreakdown.map((category, index) => (
+                        <div key={index} className="space-y-2">
+                          <div className="flex justify-between items-center">
+                            <span className="text-sm font-medium">{category.category}</span>
+                            <span className="text-sm text-gray-500">{category.percentage}%</span>
+                          </div>
+                          <div className="flex items-center space-x-3">
+                            <Progress value={category.percentage} className="flex-1" />
+                            <span className="text-sm font-medium min-w-[100px] text-right">
+                              ${category.amount.toLocaleString('es-CO')}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+              </TabsContent>
+
+              {/* Recent Tab */}
+              <TabsContent value="recent">
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Facturas Recientes</CardTitle>
+                    <CardDescription>
+                      Últimas facturas procesadas en SIIGO
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-4">
+                      {analytics.recentInvoices.map((invoice, index) => (
+                        <div key={index} className="flex items-center justify-between p-4 border rounded-lg">
+                          <div className="flex items-center space-x-4">
+                            <div className={`w-3 h-3 rounded-full ${
+                              invoice.status === 'success' ? 'bg-green-500' :
+                              invoice.status === 'pending' ? 'bg-yellow-500' : 'bg-red-500'
+                            }`}></div>
+                            <div>
+                              <div className="font-medium">{invoice.id}</div>
+                              <div className="text-sm text-gray-500">{invoice.supplier}</div>
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <div className="font-medium">
+                              ${invoice.amount.toLocaleString('es-CO')}
+                            </div>
+                            <div className="text-sm text-gray-500">
+                              {invoice.date} • {invoice.type === 'purchase' ? 'Compra' : 'Gasto'}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+              </TabsContent>
+            </Tabs>
+          </>
+        ) : (
+          <div className="text-center py-12">
+            <AlertCircle className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">No se pudieron cargar los datos</h3>
+            <p className="text-gray-600 mb-4">Hubo un problema al cargar los analytics de SIIGO</p>
+            <Button onClick={loadAnalytics} variant="outline">
+              <RefreshCw className="h-4 w-4 mr-2" />
+              Reintentar
+            </Button>
+          </div>
+        )}
       </main>
     </div>
   );

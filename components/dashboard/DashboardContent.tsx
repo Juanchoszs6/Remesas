@@ -157,22 +157,7 @@ export default function DashboardContent({ user }: DashboardContentProps) {
                 <FileText className="h-4 w-4 mr-2" />
                 Panel de Facturación
               </Button>
-              <Button 
-                className="w-full justify-start" 
-                variant="outline"
-                onClick={() => router.push('/admin')}
-              >
-                <Shield className="h-4 w-4 mr-2" />
-                Panel de Administración
-              </Button>
-              <Button 
-                className="w-full justify-start" 
-                variant="outline"
-                onClick={() => router.push('/')}
-              >
-                <UserIcon className="h-4 w-4 mr-2" />
-                Página Principal
-              </Button>
+
             </CardContent>
           </Card>
 
