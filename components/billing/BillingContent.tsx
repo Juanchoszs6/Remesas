@@ -71,6 +71,7 @@ export default function BillingContent({ user }: BillingContentProps) {
   const [analytics, setAnalytics] = useState<InvoiceAnalytics | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [selectedPeriod, setSelectedPeriod] = useState('6m');
+  // Agregar la opción 'Hoy' al filtro de período
   const router = useRouter();
 
   // Función para cargar datos de analytics desde SIIGO
@@ -79,51 +80,36 @@ export default function BillingContent({ user }: BillingContentProps) {
     try {
       console.log('🔍 Cargando analytics de facturas SIIGO...');
       
-      // Simular datos de analytics (en producción, esto vendría de SIIGO API)
-      const mockAnalytics: InvoiceAnalytics = {
-        totalInvoices: 156,
-        totalAmount: 45678900,
-        averageAmount: 292814,
-        monthlyGrowth: 12.5,
-        topSuppliers: [
-          { name: 'Proveedor ABC S.A.S', identification: '900123456', totalAmount: 8500000, invoiceCount: 23 },
-          { name: 'Servicios XYZ Ltda', identification: '800987654', totalAmount: 6200000, invoiceCount: 18 },
-          { name: 'Materiales DEF', identification: '900555444', totalAmount: 4800000, invoiceCount: 15 },
-          { name: 'Tecnología GHI', identification: '800333222', totalAmount: 3900000, invoiceCount: 12 },
-          { name: 'Suministros JKL', identification: '900777888', totalAmount: 2700000, invoiceCount: 8 }
-        ],
-        monthlyData: [
-          { month: 'Ene', amount: 3200000, count: 12 },
-          { month: 'Feb', amount: 4100000, count: 15 },
-          { month: 'Mar', amount: 3800000, count: 14 },
-          { month: 'Abr', amount: 5200000, count: 19 },
-          { month: 'May', amount: 4900000, count: 17 },
-          { month: 'Jun', amount: 6100000, count: 22 }
-        ],
-        categoryBreakdown: [
-          { category: 'Servicios Profesionales', amount: 15200000, percentage: 33.3 },
-          { category: 'Materiales y Suministros', amount: 12800000, percentage: 28.0 },
-          { category: 'Tecnología y Software', amount: 8900000, percentage: 19.5 },
-          { category: 'Servicios Públicos', amount: 5400000, percentage: 11.8 },
-          { category: 'Otros Gastos', amount: 3378900, percentage: 7.4 }
-        ],
-        recentInvoices: [
-          { id: 'INV-2024-001', date: '2024-01-26', supplier: 'Proveedor ABC S.A.S', amount: 1250000, status: 'success', type: 'purchase' },
-          { id: 'EXP-2024-002', date: '2024-01-25', supplier: 'Servicios XYZ Ltda', amount: 850000, status: 'success', type: 'expense' },
-          { id: 'INV-2024-003', date: '2024-01-24', supplier: 'Materiales DEF', amount: 2100000, status: 'pending', type: 'purchase' },
-          { id: 'EXP-2024-004', date: '2024-01-23', supplier: 'Tecnología GHI', amount: 450000, status: 'success', type: 'expense' },
-          { id: 'INV-2024-005', date: '2024-01-22', supplier: 'Suministros JKL', amount: 750000, status: 'error', type: 'purchase' }
-        ]
-      };
+      // Validar que el periodo sea válido
+      if (!['today', '1m', '3m', '6m', '1y'].includes(selectedPeriod)) {
+        throw new Error('Periodo no válido');
+      }
       
-      // Simular delay de carga
-      await new Promise(resolve => setTimeout(resolve, 1500));
+      // Obtener datos reales desde la API
+      const response = await fetch(`/api/siigo/invoices/analytics?periodo=${selectedPeriod}`);
       
-      setAnalytics(mockAnalytics);
+      if (!response.ok) {
+        const errorText = await response.text();
+        try {
+          const errorData = JSON.parse(errorText);
+          throw new Error(errorData.error || 'Error al obtener datos de analytics');
+        } catch {
+          throw new Error(`Error al cargar datos: ${response.status} - ${errorText}`);
+        }
+      }
+      
+      const analyticsData: InvoiceAnalytics = await response.json();
+      
+      // Validar que la respuesta tenga la estructura esperada
+      if (!analyticsData || typeof analyticsData !== 'object') {
+        throw new Error('Formato de respuesta inválido');
+      }
+      
+      setAnalytics(analyticsData);
       toast.success('Analytics cargados exitosamente');
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error al cargar analytics:', error);
-      toast.error('Error al cargar los datos de analytics');
+      toast.error(`Error al cargar los datos de analytics: ${error.message}`);
     } finally {
       setIsLoading(false);
     }
@@ -250,6 +236,7 @@ export default function BillingContent({ user }: BillingContentProps) {
                   onChange={(e) => setSelectedPeriod(e.target.value)}
                   className="border rounded px-3 py-1 text-sm"
                 >
+                  <option value="today">Hoy</option>
                   <option value="1m">Último mes</option>
                   <option value="3m">Últimos 3 meses</option>
                   <option value="6m">Últimos 6 meses</option>
@@ -272,8 +259,12 @@ export default function BillingContent({ user }: BillingContentProps) {
                     ${analytics.totalAmount.toLocaleString('es-CO')}
                   </div>
                   <p className="text-xs text-muted-foreground flex items-center">
-                    <TrendingUp className="h-3 w-3 mr-1 text-green-600" />
-                    +{analytics.monthlyGrowth}% desde el mes pasado
+                    {analytics.monthlyGrowth >= 0 ? (
+                      <TrendingUp className="h-3 w-3 mr-1 text-green-600" />
+                    ) : (
+                      <TrendingDown className="h-3 w-3 mr-1 text-red-600" />
+                    )}
+                    {analytics.monthlyGrowth >= 0 ? '+' : ''}{analytics.monthlyGrowth.toFixed(1)}% desde el mes pasado
                   </p>
                 </CardContent>
               </Card>
@@ -355,7 +346,8 @@ export default function BillingContent({ user }: BillingContentProps) {
                               <div className="w-12 text-sm font-medium">{month.month}</div>
                               <div className="flex-1">
                                 <Progress 
-                                  value={(month.amount / Math.max(...analytics.monthlyData.map(m => m.amount))) * 100} 
+                                  value={month.amount > 0 ? 
+                                    (month.amount / Math.max(...analytics.monthlyData.filter(m => m.amount > 0).map(m => m.amount))) * 100 : 0} 
                                   className="h-2"
                                 />
                               </div>
@@ -387,36 +379,54 @@ export default function BillingContent({ user }: BillingContentProps) {
                     </CardHeader>
                     <CardContent>
                       <div className="space-y-4">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center space-x-2">
-                            <CheckCircle className="h-4 w-4 text-green-600" />
-                            <span className="text-sm">Exitosas</span>
-                          </div>
-                          <div className="text-right">
-                            <div className="text-sm font-medium">142</div>
-                            <div className="text-xs text-gray-500">91%</div>
-                          </div>
-                        </div>
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center space-x-2">
-                            <Clock className="h-4 w-4 text-yellow-600" />
-                            <span className="text-sm">Pendientes</span>
-                          </div>
-                          <div className="text-right">
-                            <div className="text-sm font-medium">11</div>
-                            <div className="text-xs text-gray-500">7%</div>
-                          </div>
-                        </div>
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center space-x-2">
-                            <AlertCircle className="h-4 w-4 text-red-600" />
-                            <span className="text-sm">Con errores</span>
-                          </div>
-                          <div className="text-right">
-                            <div className="text-sm font-medium">3</div>
-                            <div className="text-xs text-gray-500">2%</div>
-                          </div>
-                        </div>
+                        {/* Calcular estadísticas de estado */}
+                      {(() => {
+                        // Contar facturas por estado
+                        const successCount = analytics.recentInvoices.filter(inv => inv.status === 'success').length;
+                        const pendingCount = analytics.recentInvoices.filter(inv => inv.status === 'pending').length;
+                        const errorCount = analytics.recentInvoices.filter(inv => inv.status === 'error').length;
+                        const totalCount = analytics.recentInvoices.length;
+                        
+                        // Calcular porcentajes
+                        const successPercent = totalCount > 0 ? Math.round((successCount / totalCount) * 100) : 0;
+                        const pendingPercent = totalCount > 0 ? Math.round((pendingCount / totalCount) * 100) : 0;
+                        const errorPercent = totalCount > 0 ? Math.round((errorCount / totalCount) * 100) : 0;
+                        
+                        return (
+                          <>
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center space-x-2">
+                                <CheckCircle className="h-4 w-4 text-green-600" />
+                                <span className="text-sm">Exitosas</span>
+                              </div>
+                              <div className="text-right">
+                                <div className="text-sm font-medium">{successCount}</div>
+                                <div className="text-xs text-gray-500">{successPercent}%</div>
+                              </div>
+                            </div>
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center space-x-2">
+                                <Clock className="h-4 w-4 text-yellow-600" />
+                                <span className="text-sm">Pendientes</span>
+                              </div>
+                              <div className="text-right">
+                                <div className="text-sm font-medium">{pendingCount}</div>
+                                <div className="text-xs text-gray-500">{pendingPercent}%</div>
+                              </div>
+                            </div>
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center space-x-2">
+                                <AlertCircle className="h-4 w-4 text-red-600" />
+                                <span className="text-sm">Con errores</span>
+                              </div>
+                              <div className="text-right">
+                                <div className="text-sm font-medium">{errorCount}</div>
+                                <div className="text-xs text-gray-500">{errorPercent}%</div>
+                              </div>
+                            </div>
+                          </>
+                        );
+                      })()}
                       </div>
                     </CardContent>
                   </Card>

@@ -21,7 +21,7 @@ export async function GET(req: NextRequest) {
   if (query.trim() === '') {
     // Sin parámetro de búsqueda → devolver proveedores con paginación
     sqlQuery = `
-      SELECT codigo, nombre 
+      SELECT codigo, nombre, identification 
       FROM proveedores 
       ORDER BY nombre
       LIMIT $1 OFFSET $2
@@ -31,31 +31,31 @@ export async function GET(req: NextRequest) {
     countQuery = `SELECT COUNT(*) as total FROM proveedores`;
     countValues = [];
   } else if (/^\d/.test(query)) {
-    // Empieza con número → buscar por código con paginación
+    // Empieza con número → buscar por código o identificación con paginación
     sqlQuery = `
-      SELECT codigo, nombre 
+      SELECT codigo, nombre, identification 
       FROM proveedores 
-      WHERE codigo ILIKE $1
+      WHERE codigo ILIKE $1 OR identification ILIKE $1
       ORDER BY codigo
       LIMIT $2 OFFSET $3
     `;
-    values = [`${query}%`, limit, offset];
+    values = [`%${query}%`, limit, offset];
     
-    countQuery = `SELECT COUNT(*) as total FROM proveedores WHERE codigo ILIKE $1`;
-    countValues = [`${query}%`];
+    countQuery = `SELECT COUNT(*) as total FROM proveedores WHERE codigo ILIKE $1 OR identification ILIKE $1`;
+    countValues = [`%${query}%`];
   } else {
     // Empieza con letra → buscar por nombre con paginación
     sqlQuery = `
-      SELECT codigo, nombre 
+      SELECT codigo, nombre, identification 
       FROM proveedores 
       WHERE nombre ILIKE $1
       ORDER BY nombre
       LIMIT $2 OFFSET $3
     `;
-    values = [`${query}%`, limit, offset];
+    values = [`%${query}%`, limit, offset];
     
     countQuery = `SELECT COUNT(*) as total FROM proveedores WHERE nombre ILIKE $1`;
-    countValues = [`${query}%`];
+    countValues = [`%${query}%`];
   }
 
   try {

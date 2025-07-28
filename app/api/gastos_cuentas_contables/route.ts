@@ -18,26 +18,44 @@ export async function GET(req: NextRequest) {
   let values: any[] = [];
   let countValues: any[] = [];
 
-  if (!query) {
-    sqlQuery = `SELECT codigo, nombre FROM productos ORDER BY codigo LIMIT $1 OFFSET $2`;
+  if (!query || query.trim() === '') {
+    // Sin parámetro de búsqueda → devolver todas las cuentas contables con paginación
+    sqlQuery = `
+      SELECT codigo, nombre 
+      FROM gastos_cuentas_contables 
+      ORDER BY codigo
+      LIMIT $1 OFFSET $2
+    `;
     values = [limit, offset];
     
-    countQuery = `SELECT COUNT(*) as total FROM productos`;
+    countQuery = `SELECT COUNT(*) as total FROM gastos_cuentas_contables`;
     countValues = [];
   } else if (/^\d/.test(query)) {
-    // Buscar por código con paginación
-    sqlQuery = `SELECT codigo, nombre FROM productos WHERE codigo ILIKE $1 ORDER BY codigo LIMIT $2 OFFSET $3`;
-    values = [`${query}%`, limit, offset];
+    // Buscar por código con paginación (búsqueda parcial mejorada)
+    sqlQuery = `
+      SELECT codigo, nombre 
+      FROM gastos_cuentas_contables 
+      WHERE codigo ILIKE $1
+      ORDER BY codigo
+      LIMIT $2 OFFSET $3
+    `;
+    values = [`%${query}%`, limit, offset];
     
-    countQuery = `SELECT COUNT(*) as total FROM productos WHERE codigo ILIKE $1`;
-    countValues = [`${query}%`];
+    countQuery = `SELECT COUNT(*) as total FROM gastos_cuentas_contables WHERE codigo ILIKE $1`;
+    countValues = [`%${query}%`];
   } else {
-    // Buscar por nombre con paginación
-    sqlQuery = `SELECT codigo, nombre FROM productos WHERE nombre ILIKE $1 ORDER BY nombre LIMIT $2 OFFSET $3`;
-    values = [`${query}%`, limit, offset];
+    // Buscar por nombre con paginación (búsqueda parcial mejorada)
+    sqlQuery = `
+      SELECT codigo, nombre 
+      FROM gastos_cuentas_contables 
+      WHERE nombre ILIKE $1
+      ORDER BY nombre
+      LIMIT $2 OFFSET $3
+    `;
+    values = [`%${query}%`, limit, offset];
     
-    countQuery = `SELECT COUNT(*) as total FROM productos WHERE nombre ILIKE $1`;
-    countValues = [`${query}%`];
+    countQuery = `SELECT COUNT(*) as total FROM gastos_cuentas_contables WHERE nombre ILIKE $1`;
+    countValues = [`%${query}%`];
   }
 
   try {
@@ -64,7 +82,7 @@ export async function GET(req: NextRequest) {
       }
     });
   } catch (error) {
-    console.error('Error al consultar productos:', error);
-    return NextResponse.json({ error: 'Error al consultar productos' }, { status: 500 });
+    console.error('Error al consultar cuentas contables:', error);
+    return NextResponse.json({ error: 'Error al consultar cuentas contables' }, { status: 500 });
   }
 }
