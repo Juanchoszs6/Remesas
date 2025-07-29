@@ -8,7 +8,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
-import { LogOut, User as UserIcon, Mail, Calendar, Shield, FileText } from 'lucide-react';
+import { LogOut, User as UserIcon, Mail, Calendar, Shield, FileText, BarChart2 } from 'lucide-react';
+import AnalyticsSection from './AnalyticsSection';
 import { toast } from 'sonner';
 
 interface DashboardContentProps {
@@ -147,15 +148,7 @@ export default function DashboardContent({ user }: DashboardContentProps) {
                 onClick={() => router.push('/invoice')}
               >
                 <FileText className="h-4 w-4 mr-2" />
-                Formulario SIIGO (Original)
-              </Button>
-              <Button 
-                className="w-full justify-start" 
-                variant="outline"
-                onClick={() => router.push('/facturacion')}
-              >
-                <FileText className="h-4 w-4 mr-2" />
-                Panel de Facturación
+                Formulario SIIGO
               </Button>
 
             </CardContent>
@@ -196,6 +189,9 @@ export default function DashboardContent({ user }: DashboardContentProps) {
             </CardContent>
           </Card>
         </div>
+
+        {/* Analytics Section */}
+        <AnalyticsSection />
 
         {/* Welcome Message */}
         <Card className="mt-6">

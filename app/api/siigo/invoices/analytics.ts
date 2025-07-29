@@ -202,7 +202,7 @@ function procesarDatosFacturas(data: any, monthsToGenerate: number = 6) {
       if (isNaN(date.getTime())) return;
       
       const monthKey = `${date.getFullYear()}-${date.getMonth() + 1}`;
-      const monthName = monthNames[date.getMonth()];
+      const monthName = shortMonthNames[date.getMonth()];
       
       if (!monthMap.has(monthKey)) {
         monthMap.set(monthKey, {
@@ -247,36 +247,34 @@ function procesarDatosFacturas(data: any, monthsToGenerate: number = 6) {
     .sort((a, b) => a.key.localeCompare(b.key));
   
   // Asegurar que tenemos datos para los últimos meses según el periodo
-  // Si no hay suficientes datos, rellenar con meses vacíos
   const today = new Date();
   const monthNames = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
   
   // Crear un mapa con los meses existentes para búsqueda rápida
   const existingMonths = new Map(monthlyData.map(m => [m.key, m]));
   
-  // Determinar cuántos meses mostrar según el periodo
-  let monthsToShow = monthsToGenerate; // Usar el valor pasado como parámetro
-  
   // Generar los últimos meses según el periodo
   const lastMonths = [];
-  for (let i = monthsToShow - 1; i >= 0; i--) {
+  for (let i = monthsToGenerate - 1; i >= 0; i--) {
     const date = new Date(today.getFullYear(), today.getMonth() - i, 1);
-    const monthKey = `${date.getFullYear()}-${date.getMonth() + 1}`;
+    const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
     const monthName = monthNames[date.getMonth()];
     
-    if (existingMonths.has(monthKey)) {
-      lastMonths.push(existingMonths.get(monthKey));
-    } else {
-      lastMonths.push({
-        month: monthName,
-        amount: 0,
-        count: 0,
-        key: monthKey
-      });
-    }
+    lastMonths.push({
+      month: monthName,
+      amount: existingMonths.has(monthKey) ? existingMonths.get(monthKey).amount : 0,
+      count: existingMonths.has(monthKey) ? existingMonths.get(monthKey).count : 0,
+      key: monthKey
+    });
   }
   
-  monthlyData = lastMonths;
+  // Asegurar que los datos mensuales tengan el formato correcto
+  monthlyData = lastMonths.map(month => ({
+    month: month.month,
+    amount: Number(month.amount.toFixed(2)), // Asegurar 2 decimales
+    count: month.count,
+    key: month.key // Mantener la clave para referencia interna
+  }));
   
   // Calcular crecimiento mensual (comparando el último mes con el anterior)
   let monthlyGrowth = 0;
@@ -428,68 +426,172 @@ function procesarDatosFacturas(data: any, monthsToGenerate: number = 6) {
 
 // Función principal para obtener analytics
 export async function obtenerAnalyticsSiigo(periodo: string = '6m'): Promise<InvoiceAnalytics> {
+  console.log(`🔄 Obteniendo analytics para el período: ${periodo}`);
+  
   try {
+    // Validar el parámetro de período
+    if (!['today', '1m', '3m', '6m', '1y'].includes(periodo)) {
+      console.warn(`❌ Período no válido: ${periodo}. Usando valor por defecto '6m'`);
+      periodo = '6m';
+    }
+
     // Obtener token de autenticación
+    console.log('🔑 Obteniendo token de autenticación...');
     const token = await obtenerTokenSiigo();
     if (!token) {
       throw new Error('No se pudo obtener el token de autenticación de Siigo');
     }
     
     // Calcular fechas según el periodo seleccionado
-    const endDate = new Date().toISOString().split('T')[0]; // Hoy
+    const today = new Date();
+    const endDate = today.toISOString().split('T')[0]; // Hoy
     let startDate: string;
     let monthsToGenerate = 6; // Por defecto 6 meses
     
+    // Calcular fechas según el período seleccionado
     switch (periodo) {
-      case 'today':
-        startDate = endDate; // Mismo día (hoy)
+      case 'today': {
+        startDate = endDate;
         monthsToGenerate = 1;
+        console.log(`📅 Período: Hoy (${startDate})`);
         break;
-      case '1m':
-        startDate = new Date(new Date().setMonth(new Date().getMonth() - 1)).toISOString().split('T')[0];
+      }
+      case '1m': {
+        const date = new Date(today);
+        date.setMonth(date.getMonth() - 1);
+        startDate = date.toISOString().split('T')[0];
         monthsToGenerate = 1;
+        console.log(`📅 Período: Último mes (${startDate} - ${endDate})`);
         break;
-      case '3m':
-        startDate = new Date(new Date().setMonth(new Date().getMonth() - 3)).toISOString().split('T')[0];
+      }
+      case '3m': {
+        const date = new Date(today);
+        date.setMonth(date.getMonth() - 3);
+        startDate = date.toISOString().split('T')[0];
         monthsToGenerate = 3;
+        console.log(`📅 Período: Últimos 3 meses (${startDate} - ${endDate})`);
         break;
-      case '1y':
-        startDate = new Date(new Date().setFullYear(new Date().getFullYear() - 1)).toISOString().split('T')[0];
+      }
+      case '1y': {
+        const date = new Date(today);
+        date.setFullYear(date.getFullYear() - 1);
+        startDate = date.toISOString().split('T')[0];
         monthsToGenerate = 12;
+        console.log(`📅 Período: Último año (${startDate} - ${endDate})`);
         break;
+      }
       case '6m':
-      default:
-        startDate = new Date(new Date().setMonth(new Date().getMonth() - 6)).toISOString().split('T')[0];
+      default: {
+        const date = new Date(today);
+        date.setMonth(date.getMonth() - 6);
+        startDate = date.toISOString().split('T')[0];
         monthsToGenerate = 6;
+        console.log(`📅 Período: Últimos 6 meses (${startDate} - ${endDate})`);
         break;
+      }
     }
     
     // Obtener facturas de Siigo
+    console.log('📊 Obteniendo facturas de Siigo...');
     const facturas = await obtenerFacturasSiigo(token, startDate, endDate);
     
+    // Validar que se obtuvieron facturas
+    if (!facturas || (!facturas.purchases?.length && !facturas.vouchers?.length)) {
+      console.warn('⚠️ No se encontraron facturas en el período seleccionado');
+      // Devolver estructura vacía en lugar de lanzar error
+      return {
+        totalInvoices: 0,
+        totalAmount: 0,
+        averageAmount: 0,
+        monthlyGrowth: 0,
+        topSuppliers: [],
+        monthlyData: [],
+        categoryBreakdown: [],
+        recentInvoices: []
+      };
+    }
+    
     // Procesar datos para generar analytics
+    console.log('📈 Procesando datos de facturas...');
     const analytics = procesarDatosFacturas(facturas, monthsToGenerate);
     
-    // Ensure type safety by explicitly mapping analytics to InvoiceAnalytics interface
-    return {
-      ...analytics,
-      recentInvoices: analytics.recentInvoices.map(invoice => ({
-        ...invoice,
-        // Convert 'Gasto' to 'expense' and 'Compra' to 'purchase' to match the enum type
-        type: invoice.type === 'Gasto' ? 'expense' : 'purchase'
+    // Validar y formatear los datos de salida
+    const result: InvoiceAnalytics = {
+      totalInvoices: analytics.totalInvoices || 0,
+      totalAmount: analytics.totalAmount || 0,
+      averageAmount: analytics.averageAmount || 0,
+      monthlyGrowth: analytics.monthlyGrowth || 0,
+      topSuppliers: Array.isArray(analytics.topSuppliers) ? analytics.topSuppliers : [],
+      monthlyData: (Array.isArray(analytics.monthlyData) ? analytics.monthlyData : []).map(item => ({
+        month: String(item.month || ''),
+        amount: Number(item.amount || 0),
+        count: Number(item.count || 0)
+      })),
+      categoryBreakdown: (Array.isArray(analytics.categoryBreakdown) ? analytics.categoryBreakdown : []).map(item => ({
+        category: String(item.category || ''),
+        amount: Number(item.amount || 0),
+        percentage: Number(item.percentage || 0)
+      })),
+      recentInvoices: (Array.isArray(analytics.recentInvoices) ? analytics.recentInvoices : []).map(invoice => ({
+        id: String(invoice.id || ''),
+        date: String(invoice.date || ''),
+        supplier: String(invoice.supplier || ''),
+        amount: Number(invoice.amount || 0),
+        status: invoice.status === 'success' || invoice.status === 'pending' || invoice.status === 'error' 
+          ? invoice.status 
+          : 'pending',
+        type: invoice.type === 'Gasto' || invoice.type === 'expense' ? 'expense' : 'purchase'
       }))
-    } as InvoiceAnalytics;
-  } catch (error: any) {
-    console.error('Error al obtener analytics de Siigo:', error);
+    };
     
-    // En caso de error, devolver datos simulados para evitar que la UI se rompa
+    console.log('✅ Análisis completado exitosamente');
+    return result;
+  } catch (error: any) {
+    console.error('❌ Error al obtener analytics de Siigo:', {
+      message: error.message,
+      stack: error.stack,
+      ...(error.response ? {
+        status: error.response.status,
+        statusText: error.response.statusText,
+        data: error.response.data
+      } : {})
+    });
+    
+    // En caso de error, devolver datos vacíos
+    const errorMessage = error.response?.data?.error || error.message || 'Error desconocido';
+    console.error('❌ Error en obtenerAnalyticsSiigo:', errorMessage);
+    
+    // Crear datos vacíos para el período actual
+    const today = new Date();
+    const monthNames = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
+    const monthlyData: { month: string; amount: number; count: number }[] = [];
+    
+    // Determinar cuántos meses generar según el período
+    const monthsCount = periodo === 'today' ? 1 : 
+                       periodo === '1m' ? 1 : 
+                       periodo === '3m' ? 3 : 
+                       periodo === '1y' ? 12 : 6;
+    
+    // Generar datos mensuales vacíos
+    for (let i = monthsCount - 1; i >= 0; i--) {
+      const date = new Date(today.getFullYear(), today.getMonth() - i, 1);
+      const monthName = monthNames[date.getMonth()];
+      
+      monthlyData.push({
+        month: monthName,
+        amount: 0,
+        count: 0
+      });
+    }
+    
+    // Devolver estructura vacía con tipos correctos
     return {
       totalInvoices: 0,
       totalAmount: 0,
       averageAmount: 0,
       monthlyGrowth: 0,
       topSuppliers: [],
-      monthlyData: [],
+      monthlyData,
       categoryBreakdown: [],
       recentInvoices: []
     };
