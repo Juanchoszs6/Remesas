@@ -135,43 +135,62 @@ const transformSiigoInvoices = async (invoices: SiigoInvoice[]): Promise<Analyti
     };
   }
   
+  // Ordenar facturas por fecha (más antigua a más reciente)
+  const sortedInvoices = [...invoices].sort((a, b) => 
+    new Date(a.date).getTime() - new Date(b.date).getTime()
+  );
+  
   const suppliers = new Map<string, SupplierData>();
-  const monthlyStats = new Map<string, { amount: number; count: number }>();
+  const monthlyStats = new Map<string, { amount: number; count: number; date: Date }>();
+  const now = new Date();
+  
+  // Obtener el rango de los últimos 6 meses
+  const sixMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 5, 1);
+  
+  // Inicializar los últimos 6 meses con valores en 0
+  for (let i = 0; i < 6; i++) {
+    const date = new Date(now.getFullYear(), now.getMonth() - (5 - i), 1);
+    const monthKey = date.toLocaleDateString('es-CO', { 
+      year: 'numeric', 
+      month: 'short'
+    });
+    
+    // Inicializar con valores en 0, manteniendo la fecha para ordenamiento
+    monthlyStats.set(monthKey, { 
+      amount: 0, 
+      count: 0,
+      date: new Date(date.getFullYear(), date.getMonth(), 1) // Primer día del mes para ordenamiento
+    });
+  }
   
   let totalAmount = 0;
   let totalInvoices = 0;
-  
   const supplierNames = new Map<string, string>();
   
-  for (const invoice of invoices) {
+  // Procesar todas las facturas
+  for (const invoice of sortedInvoices) {
     try {
       const amount = parseFloat(invoice.total?.toString() || '0');
       const supplierIdentification = invoice.supplier?.identification || 'UNKNOWN';
+      const invoiceDate = new Date(invoice.date);
       
+      // Obtener o crear el nombre del proveedor
       let supplierName = supplierNames.get(supplierIdentification);
       if (!supplierName) {
-        if (supplierIdentification === 'UNKNOWN') {
-          supplierName = 'Proveedor Desconocido';
-        } else {
-          supplierName = await getSupplierName(supplierIdentification);
-        }
+        supplierName = supplierIdentification === 'UNKNOWN' 
+          ? 'Proveedor Desconocido' 
+          : await getSupplierName(supplierIdentification);
         supplierNames.set(supplierIdentification, supplierName);
       }
       
-      const supplierId = supplierIdentification;
-      
-      const invoiceDate = new Date(invoice.date);
-      const monthKey = invoiceDate.toLocaleDateString('es-CO', { 
-        year: 'numeric', 
-        month: 'short' 
-      });
-      
+      // Actualizar estadísticas generales
       totalAmount += amount;
       totalInvoices++;
       
-      if (!suppliers.has(supplierId)) {
-        suppliers.set(supplierId, {
-          id: supplierId,
+      // Actualizar estadísticas de proveedores
+      if (!suppliers.has(supplierIdentification)) {
+        suppliers.set(supplierIdentification, {
+          id: supplierIdentification,
           name: supplierName,
           identification: supplierIdentification,
           totalAmount: 0,
@@ -181,34 +200,48 @@ const transformSiigoInvoices = async (invoices: SiigoInvoice[]): Promise<Analyti
         });
       }
       
-      const supplier = suppliers.get(supplierId)!;
-      supplier.totalAmount += amount;
-      supplier.invoiceCount++;
-      supplier.invoices.push(invoice);
+      const currentSupplier = suppliers.get(supplierIdentification)!;
+      currentSupplier.totalAmount += amount;
+      currentSupplier.invoiceCount++;
+      currentSupplier.invoices.push(invoice);
       
-      if (!monthlyStats.has(monthKey)) {
-        monthlyStats.set(monthKey, { amount: 0, count: 0 });
+      // Formatear la clave del mes para coincidir con las claves ya inicializadas
+      const monthKey = invoiceDate.toLocaleDateString('es-CO', { 
+        year: 'numeric', 
+        month: 'short'
+      });
+      
+      // Procesar facturas de los últimos 6 meses para el gráfico
+      const invoiceMonthStart = new Date(invoiceDate.getFullYear(), invoiceDate.getMonth(), 1);
+      if (invoiceMonthStart >= new Date(sixMonthsAgo.getFullYear(), sixMonthsAgo.getMonth(), 1)) {
+        // Buscar la entrada correspondiente en monthlyStats
+        for (const [key, data] of monthlyStats.entries()) {
+          const statsDate = data.date;
+          if (statsDate.getFullYear() === invoiceDate.getFullYear() && 
+              statsDate.getMonth() === invoiceDate.getMonth()) {
+            // Actualizar los datos del mes correspondiente
+            data.amount += amount;
+            data.count++;
+            break;
+          }
+        }
       }
-      const monthData = monthlyStats.get(monthKey)!;
-      monthData.amount += amount;
-      monthData.count++;
       
     } catch (error) {
       console.error('Error procesando factura:', invoice.id, error);
     }
   }
   
+  // Convertir el mapa a array, mapear al formato esperado y ordenar por fecha
   const monthlyData = Array.from(monthlyStats.entries())
     .map(([month, data]) => ({
       month,
       amount: data.amount,
-      count: data.count
+      count: data.count,
+      date: data.date // Mantener la fecha para ordenamiento consistente
     }))
-    .sort((a, b) => {
-      const dateA = new Date(`01 ${a.month}`);
-      const dateB = new Date(`01 ${b.month}`);
-      return dateA.getTime() - dateB.getTime();
-    });
+    .sort((a, b) => a.date.getTime() - b.date.getTime())
+    .map(({ date, ...rest }) => rest); // Eliminar la fecha del objeto final
   
   const suppliersArray = Array.from(suppliers.values())
     .sort((a, b) => b.totalAmount - a.totalAmount)
@@ -303,58 +336,106 @@ const StatsCards = ({ analytics, period }: { analytics: AnalyticsData; period: s
   </div>
 );
 
-// Componente de Gráfico Mensual
-const MonthlyChart = ({ data }: { data: AnalyticsData['monthlyData'] }) => (
-  <Card className="lg:col-span-2">
-    <CardHeader>
-      <CardTitle>Tendencia Mensual</CardTitle>
-      <CardDescription>Evolución de facturación por mes</CardDescription>
-    </CardHeader>
-    <CardContent className="h-80">
-      {data && data.length > 0 ? (
-        <ResponsiveContainer width="100%" height="100%">
-          <LineChart data={data}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-            <XAxis 
-              dataKey="month" 
-              tick={{ fontSize: 12 }}
-              tickLine={false}
-              axisLine={false}
-            />
-            <YAxis 
-              tickFormatter={(value) => `$${(value / 1000000).toFixed(1)}M`}
-              tick={{ fontSize: 12 }}
-              tickLine={false}
-              axisLine={false}
-            />
-            <Tooltip 
-              formatter={(value: number) => [formatCurrency(value), 'Monto']}
-              labelFormatter={(label) => `Mes: ${label}`}
-            />
-            <Legend />
-            <Line 
-              type="monotone" 
-              dataKey="amount" 
-              name="Monto Total" 
-              stroke="#0088FE" 
-              strokeWidth={3}
-              dot={{ fill: '#0088FE', strokeWidth: 2, r: 4 }}
-              activeDot={{ r: 6, stroke: '#0088FE', strokeWidth: 2 }}
-            />
-          </LineChart>
-        </ResponsiveContainer>
-      ) : (
-        <div className="flex items-center justify-center h-full text-gray-500">
-          <div className="text-center">
-            <AlertCircle className="h-8 w-8 mx-auto mb-2" />
-            <p>No hay datos disponibles para el gráfico</p>
-            <p className="text-xs mt-1">Verifica la conexión con Siigo</p>
-          </div>
+// Componente de Gráfico Mensual Mejorado
+const MonthlyChart = ({ data }: { data: AnalyticsData['monthlyData'] }) => {
+  // Obtener los últimos 6 meses con formato corto
+  const now = new Date();
+  const last6Months = Array.from({ length: 6 }, (_, i) => {
+    const date = new Date(now.getFullYear(), now.getMonth() - (5 - i), 1);
+    return {
+      full: date.toLocaleDateString('es-CO', { year: 'numeric', month: 'short' }),
+      short: date.toLocaleDateString('es-CO', { month: 'short' }).slice(0, 3)
+    };
+  });
+  
+  // Mapear los datos existentes para búsqueda rápida
+  const dataMap = new Map(data.map(item => [item.month, item]));
+  
+  // Asegurar que tengamos los 6 meses, incluso sin datos
+  const chartData = last6Months.map(({ full, short }) => ({
+    month: full,
+    shortMonth: short,
+    amount: dataMap.get(full)?.amount || 0,
+    count: dataMap.get(full)?.count || 0
+  }));
+
+  // Calcular el máximo para el eje Y (redondeado al millón más cercano)
+  const maxAmount = Math.max(...chartData.map(item => item.amount), 0);
+  const yMax = Math.ceil(maxAmount / 1000000) * 1000000;
+
+  return (
+    <Card className="h-full flex flex-col">
+      <CardHeader className="pb-2">
+        <CardTitle className="text-lg">Tendencia Mensual</CardTitle>
+        <CardDescription className="text-sm">Evolución de facturación</CardDescription>
+      </CardHeader>
+      <CardContent className="flex-1 p-4 pt-0">
+        <div className="h-[280px] w-full">
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart 
+              data={chartData}
+              margin={{ top: 5, right: 10, left: 0, bottom: 5 }}
+            >
+              <CartesianGrid vertical={false} stroke="#f5f5f5" />
+              <XAxis 
+                dataKey="shortMonth" 
+                tick={{ fontSize: 11, fill: '#64748b' }}
+                tickLine={false}
+                axisLine={false}
+                interval={0}
+                padding={{ left: 15, right: 15 }}
+              />
+              <YAxis 
+                tickFormatter={(value) => `$${(value / 1000000).toFixed(0)}M`}
+                tick={{ fontSize: 11, fill: '#64748b' }}
+                tickLine={false}
+                axisLine={false}
+                domain={[0, yMax]}
+                width={50}
+              />
+              <Tooltip 
+                formatter={(value: number, name: string) => [
+                  formatCurrency(Number(value)), 
+                  name === 'amount' ? 'Monto Total' : 'Facturas'
+                ]}
+                labelFormatter={(label) => `Mes: ${label}`}
+                contentStyle={{
+                  backgroundColor: 'white',
+                  border: '1px solid #e2e8f0',
+                  borderRadius: '0.5rem',
+                  padding: '8px 12px',
+                  fontSize: '13px',
+                  boxShadow: '0 2px 4px rgba(0,0,0,0.05)'
+                }}
+                labelStyle={{ fontWeight: 500, marginBottom: 4 }}
+              />
+              <Line 
+                type="monotone" 
+                dataKey="amount" 
+                name="Monto Total"
+                stroke="#3b82f6" 
+                strokeWidth={2.5}
+                dot={{
+                  fill: '#3b82f6',
+                  stroke: '#fff',
+                  strokeWidth: 2,
+                  r: 4,
+                  strokeOpacity: 0.9
+                }}
+                activeDot={{ 
+                  r: 6, 
+                  stroke: '#fff', 
+                  strokeWidth: 2,
+                  fill: '#2563eb'
+                }}
+              />
+            </LineChart>
+          </ResponsiveContainer>
         </div>
-      )}
-    </CardContent>
-  </Card>
-);
+      </CardContent>
+    </Card>
+  );
+};
 
 // Componente Principal
 export default function AnalyticsSection() {
@@ -541,81 +622,111 @@ export default function AnalyticsSection() {
             variant="outline"
             size="sm"
             disabled={isLoading}
+            className="flex items-center gap-2"
           >
-            <RefreshCw className={`h-4 w-4 mr-2 ${isLoading ? 'animate-spin' : ''}`} />
+            <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
             Actualizar
           </Button>
-          {['1m', '3m', '6m', '1y'].map((p) => (
-            <Button
-              key={p}
-              variant={period === p ? 'default' : 'outline'}
-              size="sm"
-              onClick={() => setPeriod(p)}
-            >
-              {p === '1m' ? '1 mes' : p === '3m' ? '3 meses' : p === '6m' ? '6 meses' : '1 año'}
-            </Button>
-          ))}
+          <Button
+            variant="default"
+            size="sm"
+            className="px-4"
+            disabled
+          >
+            6 meses
+          </Button>
         </div>
       </div>
 
-      <StatsCards analytics={analytics} period={period} />
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <MonthlyChart data={analytics.monthlyData} />
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 max-w-7xl mx-auto w-full">
+        <div className="lg:col-span-2">
+          <MonthlyChart data={analytics.monthlyData} />
+        </div>
         
-        <Card>
-          <CardHeader>
-            <CardTitle>Proveedores Principales</CardTitle>
-            <CardDescription>Por monto facturado en el período</CardDescription>
+        <Card className="h-full flex flex-col">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-lg">Proveedores Principales</CardTitle>
+            <CardDescription className="text-sm">Por monto facturado</CardDescription>
           </CardHeader>
-          <CardContent>
-            <div className="space-y-4">
-              {analytics.suppliers.length > 0 ? (
-                analytics.suppliers.map((supplier, index) => {
+          <CardContent className="flex-1 p-4 pt-0 overflow-y-auto max-h-[360px]">
+            {analytics.suppliers.length > 0 ? (
+              <div className="space-y-3">
+                {analytics.suppliers.map((supplier, index) => {
                   const displayName = supplier.name || `Proveedor ${supplier.identification}`;
                   const shortId = supplier.identification 
                     ? supplier.identification.slice(0, 8) + (supplier.identification.length > 8 ? '...' : '')
                     : 'Sin ID';
                   
+                  const percentage = (supplier.totalAmount / analytics.totalAmount) * 100;
+                  
                   return (
-                    <div key={`${supplier.id}-${index}`} className="flex items-center justify-between py-3 border-b last:border-b-0">
-                      <div className="space-y-1 min-w-0 flex-1 pr-4">
-                        <div className="flex items-center space-x-2">
-                          <p className="text-sm font-medium leading-tight truncate" title={displayName}>
-                            {displayName}
-                          </p>
-                          {supplier.isUnknown && (
-                            <Badge variant="secondary" className="text-xs">
-                              Desconocido
-                            </Badge>
-                          )}
+                    <div 
+                      key={`${supplier.id}-${index}`} 
+                      className="group p-3 rounded-lg border hover:bg-gray-50 transition-colors"
+                      data-supplier-id={supplier.id}
+                    >
+                      <div className="flex items-start justify-between space-x-3">
+                        <div className="flex-shrink-0 w-8 h-8 rounded-md bg-blue-50 flex items-center justify-center mt-0.5">
+                          <span className="text-blue-600 font-medium text-xs">{index + 1}</span>
                         </div>
-                        <div className="flex items-center space-x-2 text-xs text-muted-foreground">
-                          <span className="bg-gray-100 px-2 py-0.5 rounded">
-                            {supplier.invoiceCount} factura{supplier.invoiceCount !== 1 ? 's' : ''}
-                          </span>
-                          {supplier.identification !== 'UNKNOWN' && (
-                            <span className="text-gray-500">ID: {shortId}</span>
-                          )}
+                        
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center justify-between">
+                            <h4 
+                              className="text-sm font-medium text-gray-900 truncate pr-2" 
+                              title={displayName}
+                            >
+                              {displayName}
+                            </h4>
+                            <span className="text-sm font-semibold text-gray-900 whitespace-nowrap">
+                              {formatCurrency(supplier.totalAmount)}
+                            </span>
+                          </div>
+                          
+                          <div className="flex items-center justify-between mt-1">
+                            <div className="flex items-center space-x-2">
+                              <span className="text-xs text-gray-500 bg-gray-100 px-2 py-0.5 rounded">
+                                {supplier.invoiceCount} factura{supplier.invoiceCount !== 1 ? 's' : ''}
+                              </span>
+                              {supplier.identification !== 'UNKNOWN' && supplier.identification && (
+                                <span className="text-xs text-gray-500 hidden sm:inline-block">
+                                  ID: {shortId}
+                                </span>
+                              )}
+                              {supplier.isUnknown && (
+                                <Badge 
+                                  variant="outline" 
+                                  className="text-2xs text-amber-600 border-amber-200 bg-amber-50 h-4 px-1.5"
+                                >
+                                  Sin identificar
+                                </Badge>
+                              )}
+                            </div>
+                            
+                            <span className="text-xs font-medium text-blue-600 whitespace-nowrap">
+                              {percentage.toFixed(1)}%
+                            </span>
+                          </div>
+                          
+                          <div className="w-full bg-gray-100 rounded-full h-1.5 mt-2 overflow-hidden">
+                            <div 
+                              className="bg-blue-500 h-full rounded-full transition-all duration-300" 
+                              style={{ width: `${Math.min(percentage, 100)}%` }}
+                            />
+                          </div>
                         </div>
-                      </div>
-                      <div className="text-right min-w-[120px]">
-                        <p className="font-medium text-sm">{formatCurrency(supplier.totalAmount)}</p>
-                        <p className="text-xs text-muted-foreground">
-                          {((supplier.totalAmount / analytics.totalAmount) * 100).toFixed(1)}% del total
-                        </p>
                       </div>
                     </div>
                   );
-                })
-              ) : (
-                <div className="text-center py-8 text-sm text-muted-foreground">
-                  <FileText className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                  <p>No hay proveedores para mostrar</p>
-                  <p className="text-xs">Verifica el período seleccionado</p>
-                </div>
-              )}
-            </div>
+                })}
+              </div>
+            ) : (
+              <div className="h-full flex flex-col items-center justify-center text-center p-6">
+                <FileText className="h-10 w-10 text-gray-300 mb-2" />
+                <p className="text-sm font-medium text-gray-500">No hay proveedores</p>
+                <p className="text-xs text-gray-400 mt-1">Intenta con otro período</p>
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>
