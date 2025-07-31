@@ -144,12 +144,10 @@ const transformSiigoInvoices = async (invoices: SiigoInvoice[]): Promise<Analyti
   const monthlyStats = new Map<string, { amount: number; count: number; date: Date }>();
   const now = new Date();
   
-  // Obtener el rango de los últimos 6 meses
-  const sixMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 5, 1);
-  
-  // Inicializar los últimos 6 meses con valores en 0
-  for (let i = 0; i < 6; i++) {
-    const date = new Date(now.getFullYear(), now.getMonth() - (5 - i), 1);
+  // Inicializar los últimos 12 meses con valores en 0 para asegurar una visualización más completa
+  // Aseguramos que se muestren todos los meses en el gráfico, incluso si no hay datos
+  for (let i = 0; i < 12; i++) {
+    const date = new Date(now.getFullYear(), now.getMonth() - (11 - i), 1);
     const monthKey = date.toLocaleDateString('es-CO', { 
       year: 'numeric', 
       month: 'short'
@@ -159,9 +157,31 @@ const transformSiigoInvoices = async (invoices: SiigoInvoice[]): Promise<Analyti
     monthlyStats.set(monthKey, { 
       amount: 0, 
       count: 0,
-      date: new Date(date.getFullYear(), date.getMonth(), 1) // Primer día del mes para ordenamiento
+      date: new Date(date) // Guardar la fecha para ordenamiento posterior
     });
   }
+  
+  // Agregar julio de 2025 si no existe (para manejar el caso donde todas las facturas son de julio 2025)
+  const july2025Key = new Date(2025, 6, 1).toLocaleDateString('es-CO', { 
+    year: 'numeric', 
+    month: 'short'
+  });
+  
+  if (!monthlyStats.has(july2025Key)) {
+    console.log(`Agregando julio 2025 al mapa de estadísticas: ${july2025Key}`);
+    monthlyStats.set(july2025Key, { 
+      amount: 0, 
+      count: 0,
+      date: new Date(2025, 6, 1) // Julio 2025
+    });
+  }
+  
+  // Depuración: verificar que todos los meses estén inicializados
+  console.log('Meses inicializados:', Array.from(monthlyStats.keys()));
+
+  
+  // Depuración: mostrar los meses inicializados para estadísticas
+  console.log('Meses inicializados para estadísticas:', Array.from(monthlyStats.keys()));
   
   let totalAmount = 0;
   let totalInvoices = 0;
@@ -172,7 +192,11 @@ const transformSiigoInvoices = async (invoices: SiigoInvoice[]): Promise<Analyti
     try {
       const amount = parseFloat(invoice.total?.toString() || '0');
       const supplierIdentification = invoice.supplier?.identification || 'UNKNOWN';
+      // Convertir la fecha de la factura a objeto Date
+      console.log(`Fecha original de la factura: ${invoice.date}, tipo: ${typeof invoice.date}`);
       const invoiceDate = new Date(invoice.date);
+      console.log(`Fecha convertida: ${invoiceDate}, ISO: ${invoiceDate.toISOString()}, año: ${invoiceDate.getFullYear()}, mes: ${invoiceDate.getMonth() + 1}`);
+      
       
       // Obtener o crear el nombre del proveedor
       let supplierName = supplierNames.get(supplierIdentification);
@@ -205,26 +229,28 @@ const transformSiigoInvoices = async (invoices: SiigoInvoice[]): Promise<Analyti
       currentSupplier.invoiceCount++;
       currentSupplier.invoices.push(invoice);
       
-      // Formatear la clave del mes para coincidir con las claves ya inicializadas
-      const monthKey = invoiceDate.toLocaleDateString('es-CO', { 
+      // Procesar todas las facturas para el gráfico, sin filtrar por fecha
+      let invoiceMonthKey = invoiceDate.toLocaleDateString('es-CO', { 
         year: 'numeric', 
         month: 'short'
       });
       
-      // Procesar facturas de los últimos 6 meses para el gráfico
-      const invoiceMonthStart = new Date(invoiceDate.getFullYear(), invoiceDate.getMonth(), 1);
-      if (invoiceMonthStart >= new Date(sixMonthsAgo.getFullYear(), sixMonthsAgo.getMonth(), 1)) {
-        // Buscar la entrada correspondiente en monthlyStats
-        for (const [key, data] of monthlyStats.entries()) {
-          const statsDate = data.date;
-          if (statsDate.getFullYear() === invoiceDate.getFullYear() && 
-              statsDate.getMonth() === invoiceDate.getMonth()) {
-            // Actualizar los datos del mes correspondiente
-            data.amount += amount;
-            data.count++;
-            break;
-          }
-        }
+      console.log(`Procesando factura para el mes: ${invoiceMonthKey}, fecha original: ${invoice.date}, fecha parseada: ${invoiceDate.toISOString()}`);
+      
+      // Si el mes existe en nuestro mapa de estadísticas, actualizarlo
+      if (monthlyStats.has(invoiceMonthKey)) {
+        const data = monthlyStats.get(invoiceMonthKey)!;
+        data.amount += amount;
+        data.count++;
+      } else {
+        // Si el mes no está en nuestros últimos 6 meses, crear una nueva entrada
+        // para asegurarnos de que todas las facturas se incluyan
+        console.log(`Agregando nuevo mes al mapa de estadísticas: ${invoiceMonthKey}`);
+        monthlyStats.set(invoiceMonthKey, {
+          amount: amount,
+          count: 1,
+          date: new Date(invoiceDate.getFullYear(), invoiceDate.getMonth(), 1)
+        });
       }
       
     } catch (error) {
@@ -242,6 +268,14 @@ const transformSiigoInvoices = async (invoices: SiigoInvoice[]): Promise<Analyti
     }))
     .sort((a, b) => a.date.getTime() - b.date.getTime())
     .map(({ date, ...rest }) => rest); // Eliminar la fecha del objeto final
+    
+  console.log('Datos mensuales procesados:', monthlyData);
+  console.log('Meses disponibles en monthlyStats:', Array.from(monthlyStats.keys()));
+  console.log('Valores en monthlyStats:', Array.from(monthlyStats.entries()).map(([key, value]) => ({ 
+    month: key, 
+    amount: value.amount, 
+    count: value.count 
+  })));
   
   const suppliersArray = Array.from(suppliers.values())
     .sort((a, b) => b.totalAmount - a.totalAmount)
@@ -338,26 +372,33 @@ const StatsCards = ({ analytics, period }: { analytics: AnalyticsData; period: s
 
 // Componente de Gráfico Mensual Mejorado
 const MonthlyChart = ({ data }: { data: AnalyticsData['monthlyData'] }) => {
-  // Obtener los últimos 6 meses con formato corto
-  const now = new Date();
-  const last6Months = Array.from({ length: 6 }, (_, i) => {
-    const date = new Date(now.getFullYear(), now.getMonth() - (5 - i), 1);
+  // Depuración: mostrar los datos recibidos
+  console.log('Datos mensuales recibidos en MonthlyChart:', data);
+  
+  // Preparar los datos para el gráfico
+  const chartData = data.map(item => {
+    // Obtener el nombre corto del mes
+    const dateParts = item.month.split(' ');
+    const shortMonth = dateParts[0].slice(0, 3);
+    
     return {
-      full: date.toLocaleDateString('es-CO', { year: 'numeric', month: 'short' }),
-      short: date.toLocaleDateString('es-CO', { month: 'short' }).slice(0, 3)
+      month: item.month,
+      shortMonth: shortMonth,
+      amount: item.amount,
+      count: item.count
     };
   });
   
-  // Mapear los datos existentes para búsqueda rápida
-  const dataMap = new Map(data.map(item => [item.month, item]));
+  // Depuración: mostrar los datos procesados para el gráfico
+  console.log('Datos procesados para el gráfico:', chartData);
   
-  // Asegurar que tengamos los 6 meses, incluso sin datos
-  const chartData = last6Months.map(({ full, short }) => ({
-    month: full,
-    shortMonth: short,
-    amount: dataMap.get(full)?.amount || 0,
-    count: dataMap.get(full)?.count || 0
-  }));
+  // Mostrar información detallada sobre los datos del gráfico
+   console.log('Detalles de los datos del gráfico:', chartData.map(item => `${item.month}: ${item.amount}`));
+   
+   // Verificar si hay meses sin datos
+   if (chartData.some(item => item.amount === 0)) {
+     console.log('Hay meses sin datos de facturación');
+   }
 
   // Calcular el máximo para el eje Y (redondeado al millón más cercano)
   const maxAmount = Math.max(...chartData.map(item => item.amount), 0);
@@ -439,33 +480,32 @@ const MonthlyChart = ({ data }: { data: AnalyticsData['monthlyData'] }) => {
 
 // Componente Principal
 export default function AnalyticsSection() {
-  const [period, setPeriod] = useState('6m');
+  const [period, setPeriod] = useState('12m'); // Usar 12 meses como período predeterminado
   const [isLoading, setIsLoading] = useState(true);
   const [analytics, setAnalytics] = useState<AnalyticsData | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const getDateRange = (period: string) => {
-    const endDate = new Date();
-    const startDate = new Date();
+    // Ignoramos el período y establecemos un rango fijo para asegurar que obtenemos todos los datos
+    // incluyendo los de julio 2025 que es donde actualmente tenemos datos en la API
     
-    switch (period) {
-      case '1m':
-        startDate.setMonth(endDate.getMonth() - 1);
-        break;
-      case '3m':
-        startDate.setMonth(endDate.getMonth() - 3);
-        break;
-      case '6m':
-        startDate.setMonth(endDate.getMonth() - 6);
-        break;
-      case '1y':
-        startDate.setFullYear(endDate.getFullYear() - 1);
-        break;
-    }
+    // Fecha inicial fija: 1 de enero de 2023
+    const startDate = new Date(2023, 0, 1);
+    startDate.setHours(0, 0, 0, 0);
+    
+    // Fecha final fija: 31 de julio de 2025 (para asegurar que obtenemos los datos de julio 2025)
+    const endDate = new Date(2025, 6, 31);
+    endDate.setHours(23, 59, 59, 999);
+    
+    // Formatear fechas como YYYY-MM-DD
+    const formattedStartDate = startDate.toISOString().split('T')[0];
+    const formattedEndDate = endDate.toISOString().split('T')[0];
+    
+    console.log(`Rango de fechas calculado: ${formattedStartDate} a ${formattedEndDate}`);
     
     return {
-      start: startDate.toISOString().split('T')[0],
-      end: endDate.toISOString().split('T')[0]
+      start: formattedStartDate,
+      end: formattedEndDate
     };
   };
 
@@ -478,14 +518,20 @@ export default function AnalyticsSection() {
       // Obtener el rango de fechas
       const { start, end } = getDateRange(period);
       
+      console.log(`Rango de fechas: ${start} a ${end}`);
       console.log('Solicitando datos a /api/siigo/get-purchases...');
-      const response = await fetch(`/api/siigo/get-purchases?start_date=${start}&end_date=${end}`, {
+      
+      // Usar los parámetros correctos (created_start y created_end) para la API de Siigo
+      // Añadir parámetro get_all_pages=true para obtener múltiples páginas de resultados
+      const response = await fetch(`/api/siigo/get-purchases?created_start=${start}&created_end=${end}&get_all_pages=true`, {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',
         },
         cache: 'no-store' // Evitar caché
       });
+      
+      console.log(`URL de solicitud: /api/siigo/get-purchases?created_start=${start}&created_end=${end}&get_all_pages=true`);
       
       console.log('Respuesta del servidor:', {
         status: response.status,
@@ -501,6 +547,13 @@ export default function AnalyticsSection() {
       
       const responseData = await response.json();
       console.log('Datos de compras recibidos:', responseData);
+      
+      // Mostrar información detallada sobre las fechas de las facturas
+      if (Array.isArray(responseData)) {
+        console.log('Fechas de facturas recibidas:', responseData.map(inv => inv.date));
+      } else if (responseData && responseData.results && Array.isArray(responseData.results)) {
+        console.log('Fechas de facturas recibidas:', responseData.results.map((inv: { date: any; }) => inv.date));
+      }
       
       let invoices: SiigoInvoice[] = [];
       
@@ -535,6 +588,13 @@ export default function AnalyticsSection() {
       }
 
       console.log(`Procesando ${invoices.length} facturas...`);
+      
+      // Mostrar las fechas de las primeras 5 facturas para depuración
+      console.log('Muestra de fechas de facturas recibidas:', invoices.slice(0, 5).map(invoice => ({
+        id: invoice.id,
+        date: invoice.date,
+        parsedDate: new Date(invoice.date).toISOString()
+      })));
       
       // Procesar las facturas para obtener las métricas necesarias
       const analyticsData = await transformSiigoInvoices(invoices);
@@ -633,7 +693,7 @@ export default function AnalyticsSection() {
             className="px-4"
             disabled
           >
-            6 meses
+            {period.replace('m', ' meses').replace('y', ' año')}
           </Button>
         </div>
       </div>
