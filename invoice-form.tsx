@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { NumberInput } from "@/components/ui/number-input"
 import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -55,8 +56,8 @@ export default function SiigoInvoiceForm() {
     const newItem: InvoiceItem = {
       id: Date.now().toString(),
       type: "product",
-      code: "",
-      description: "",
+      code: "GEN-" + Date.now().toString().slice(-6), // Default code for new items
+      description: "Producto genérico",
       quantity: 1,
       price: 0,
       warehouse: sedeEnvio,
@@ -94,16 +95,40 @@ export default function SiigoInvoiceForm() {
   }
 
   const handleProductSelect = (itemId: string, option: AutocompleteOption) => {
-    updateItem(itemId, "code", option.codigo)
-    updateItem(itemId, "description", option.nombre)
-    // Solo para producto, actualiza precio y hasIVA
+    // Ensure we have a valid option with required fields
+    if (!option) {
+      console.error('No product selected')
+      return
+    }
+    
+    // If no code is provided but we have a description, generate a code
+    if (!option.codigo && option.nombre) {
+      option.codigo = 'GEN-' + Date.now().toString().slice(-6);
+    }
+    
+    // Update the item with the selected product details
+    const updates: Partial<InvoiceItem> = {
+      code: option.codigo,
+      description: option.nombre || '',
+    }
+    
+    // For product type, update price and tax info if available
     const item = items.find((i) => i.id === itemId)
-    if (item?.type === "product" || item?.type === "service") {
-      if (item?.type === "product") {
-        updateItem(itemId, "price", option.precio_base || 0)
-        updateItem(itemId, "hasIVA", option.tiene_iva !== false)
+    if (item?.type === 'product' || item?.type === 'service') {
+      if (typeof option.precio_base === 'number') {
+        updates.price = option.precio_base
+      }
+      if (option.tiene_iva !== undefined) {
+        updates.hasIVA = option.tiene_iva
       }
     }
+    
+    // Apply all updates at once
+    Object.entries(updates).forEach(([key, value]) => {
+      updateItem(itemId, key as keyof InvoiceItem, value as any)
+    })
+    
+    console.log('Product selected:', { itemId, option, updates })
   }
 
   const handleProductCodeChange = async (itemId: string, code: string) => {
@@ -176,14 +201,21 @@ export default function SiigoInvoiceForm() {
       
       // Validar que todos los items tengan código y cantidad
       for (const item of items) {
-        if (!item.code.trim()) {
+        // If this is a generic product, assign a default code
+        if ((!item.code || !item.code.toString().trim()) && item.description === 'Producto genérico') {
+          updateItem(item.id, 'code', 'GEN-' + Date.now().toString().slice(-6));
+          continue;
+        }
+        
+        // For all other items, ensure they have a valid code
+        if (!item.code || !item.code.toString().trim()) {
           throw new Error(`El item "${item.description || 'Sin descripción'}" debe tener un código`);
         }
         if (item.quantity <= 0) {
-          throw new Error(`El item "${item.code}" debe tener una cantidad mayor a 0`);
+          throw new Error(`El item "${item.code || 'Sin código'}" debe tener una cantidad mayor a 0`);
         }
-        if (item.price < 0) {
-          throw new Error(`El item "${item.code}" debe tener un precio válido`);
+        if (typeof item.price !== 'number' || isNaN(item.price) || item.price < 0) {
+          throw new Error(`El item "${item.code || 'Sin código'}" debe tener un precio válido`);
         }
       }
       
@@ -206,36 +238,143 @@ export default function SiigoInvoiceForm() {
       });
       
       // Enviar a la nueva API de facturas de compra
-      console.log('[INVOICE-FORM] Enviando petición a /api/siigo/purchases');
-      const response = await fetch('/api/siigo/purchases', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(datosFormulario)
+      console.log('[INVOICE-FORM] Enviando petición a /api/siigo/purchases', {
+        datosFormulario: {
+          ...datosFormulario,
+          // No incluir el objeto completo del proveedor para no saturar los logs
+          selectedProvider: datosFormulario.selectedProvider ? {
+            identification: datosFormulario.selectedProvider.identification,
+            name: datosFormulario.selectedProvider.name
+          } : null,
+          items: datosFormulario.items.map(item => ({
+            id: item.id,
+            type: item.type,
+            code: item.code,
+            description: item.description,
+            quantity: item.quantity,
+            price: item.price,
+            hasIVA: item.hasIVA,
+            warehouse: item.warehouse
+          }))
+        }
       });
       
-      console.log(`[INVOICE-FORM] Respuesta recibida: Status ${response.status}`);
+      let response;
+      try {
+        response = await fetch('/api/siigo/purchases', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(datosFormulario)
+        });
+      } catch (fetchError) {
+        console.error('[INVOICE-FORM] Error en la petición fetch:', fetchError);
+        throw new Error(`Error de red: ${fetchError.message}`);
+      }
       
-      const responseData = await response.json();
-      console.log('[INVOICE-FORM] Datos de respuesta:', responseData);
+      console.log(`[INVOICE-FORM] Respuesta recibida: Status ${response.status} ${response.statusText}`);
       
-      if (response.ok && responseData.success) {
-        setSubmitMessage(`✅ Factura de compra creada exitosamente en Siigo. ${responseData.message}`);
+      let responseText;
+      let responseData;
+      
+      try {
+        // Primero obtenemos el texto de la respuesta
+        responseText = await response.text();
+        console.log('[INVOICE-FORM] Respuesta de texto cruda:', responseText);
+        
+        // Intentamos parsear como JSON
+        if (responseText) {
+          try {
+            responseData = JSON.parse(responseText);
+            console.log('[INVOICE-FORM] Datos de respuesta parseados:', responseData);
+          } catch (jsonError) {
+            console.warn('[INVOICE-FORM] La respuesta no es un JSON válido, usando texto plano');
+            responseData = { message: responseText };
+          }
+        } else {
+          console.warn('[INVOICE-FORM] La respuesta está vacía');
+          responseData = {};
+        }
+      } catch (error) {
+        console.error('[INVOICE-FORM] Error procesando la respuesta:', error);
+        throw new Error(`Error procesando la respuesta del servidor: ${error.message}`);
+      }
+      
+      // Si hay un error 400, mostrar más detalles
+      if (response.status === 400) {
+        console.error('[INVOICE-FORM] Error 400 - Detalles de la petición:', {
+          url: '/api/siigo/purchases',
+          method: 'POST',
+          status: response.status,
+          statusText: response.statusText,
+          headers: Object.fromEntries(response.headers.entries()),
+          body: responseText
+        });
+      }
+      
+      if (response.ok && responseData?.success) {
+        setSubmitMessage(`✅ Factura de compra creada exitosamente en Siigo. ${responseData.message || ''}`.trim());
         console.log('[INVOICE-FORM] Factura creada exitosamente:', responseData.data);
         
         // Opcional: Limpiar formulario después del envío exitoso
         // resetForm()
       } else {
-        const errorMessage = responseData.error || responseData.message || 'Error desconocido';
-        setSubmitMessage(`❌ Error: ${errorMessage}`);
-        console.error('[INVOICE-FORM] Error en la respuesta:', responseData);
+        const errorMessage = responseData?.error || 
+                           responseData?.message || 
+                           `Error del servidor: ${response.status} ${response.statusText}`;
+        
+        console.error('[INVOICE-FORM] Error en la respuesta:', {
+          status: response.status,
+          statusText: response.statusText,
+          responseData,
+          requestData: {
+            provider: selectedProvider?.identification,
+            itemsCount: items.length,
+            hasIVA,
+            ivaPercentage
+          }
+        });
+        
+        throw new Error(errorMessage);
       }
       
     } catch (error) {
       console.error('[INVOICE-FORM] Error enviando factura:', error);
-      const errorMessage = error instanceof Error ? error.message : 'Error desconocido';
-      setSubmitMessage(`❌ Error enviando factura: ${errorMessage}`);
+      
+      // Extraer el mensaje de error de la respuesta de la API si está disponible
+      let errorMessage = 'Error desconocido al enviar la factura';
+      
+      if (error instanceof Error) {
+        errorMessage = error.message;
+        
+        // Intentar extraer más información del error de la respuesta de la API
+        try {
+          const errorData = JSON.parse(error.message);
+          if (errorData?.message) {
+            errorMessage = errorData.message;
+          }
+        } catch (e) {
+          // Si no se puede parsear como JSON, usar el mensaje de error original
+        }
+      }
+      
+      setSubmitMessage(`❌ Error: ${errorMessage}`);
+      
+      // Mostrar un mensaje más detallado en la consola
+      console.error('[INVOICE-FORM] Detalles del error:', {
+        error,
+        items: items.map(item => ({
+          code: item.code,
+          description: item.description,
+          quantity: item.quantity,
+          price: item.price,
+          hasIVA: item.hasIVA
+        })),
+        provider: selectedProvider,
+        hasIVA,
+        ivaPercentage
+      });
     } finally {
       setIsSubmitting(false)
       console.log('[INVOICE-FORM] Proceso de envío finalizado');
@@ -593,9 +732,14 @@ export default function SiigoInvoiceForm() {
     placeholder="Buscar producto por código o nombre..."
     apiEndpoint="/api/productos-lista"
     value={item.code}
-    onSelect={(option) => {
-      updateItem(item.id, "code", option.codigo);
-      updateItem(item.id, "description", option.nombre);
+    onSelect={(option) => handleProductSelect(item.id, option)}
+    onInputChange={(value) => {
+      // Update just the code when typing
+      updateItem(item.id, "code", value);
+      if (!value) {
+        // Clear description if code is cleared
+        updateItem(item.id, "description", "");
+      }
     }}
     required
   />
@@ -649,22 +793,24 @@ export default function SiigoInvoiceForm() {
 
                   <div className="space-y-2">
                     <Label>Cantidad</Label>
-                    <Input
-                      type="number"
-                      min="1"
+                    <NumberInput
                       value={item.quantity}
-                      onChange={(e) => updateItem(item.id, "quantity", Number.parseInt(e.target.value) || 1)}
+                      onChange={(value) => updateItem(item.id, "quantity", value === '' ? 1 : Number(value))}
+                      min={1}
+                      step={1}
+                      allowEmpty={false}
+                      placeholder="1"
                     />
                   </div>
 
                   <div className="space-y-2">
                     <Label>Precio Unitario</Label>
-                    <Input
-                      type="number"
-                      min="0"
-                      step="0.01"
+                    <NumberInput
                       value={item.price}
-                      onChange={(e) => updateItem(item.id, "price", Number.parseFloat(e.target.value) || 0)}
+                      onChange={(value) => updateItem(item.id, "price", value === '' ? 0 : Number(value))}
+                      min={0}
+                      step={0.01}
+                      allowEmpty={true}
                       placeholder="0.00"
                     />
                   </div>

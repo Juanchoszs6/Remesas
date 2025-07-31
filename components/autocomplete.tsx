@@ -35,13 +35,20 @@ export function Autocomplete({
   required,
   readOnlyInput = false
 }: AutocompleteProps) {
-  const [query, setQuery] = useState(value)
+  const [query, setQuery] = useState<string>(value || '')
   const [options, setOptions] = useState<AutocompleteOption[]>([])
   const [allOptions, setAllOptions] = useState<AutocompleteOption[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [showOptions, setShowOptions] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
   const optionsRef = useRef<HTMLDivElement>(null)
+
+  // Update query when value changes from parent
+  useEffect(() => {
+    if (value !== query) {
+      setQuery(value || '')
+    }
+  }, [value])
 
   // Fetch all options for readOnlyInput, or filtered for normal input
   useEffect(() => {
@@ -50,7 +57,11 @@ export function Autocomplete({
       try {
         const url = readOnlyInput ? `${apiEndpoint}` : `${apiEndpoint}?q=${encodeURIComponent(query)}`
         const response = await fetch(url)
-        const data = await response.json()
+        const result = await response.json()
+        
+        // Handle both direct array responses and paginated responses
+        const data = Array.isArray(result) ? result : (result.data || [])
+        
         setAllOptions(data)
 
         if (readOnlyInput) {
@@ -59,8 +70,10 @@ export function Autocomplete({
           } else {
             const filtered = data.filter(
               (option: AutocompleteOption) =>
-                option.codigo.toLowerCase().includes(query.toLowerCase()) ||
-                option.nombre.toLowerCase().includes(query.toLowerCase())
+                option.codigo && option.nombre && (
+                  option.codigo.toLowerCase().includes(query.toLowerCase()) ||
+                  option.nombre.toLowerCase().includes(query.toLowerCase())
+                )
             )
             setOptions(filtered)
           }
@@ -113,7 +126,13 @@ export function Autocomplete({
   const handleOptionSelect = (option: AutocompleteOption) => {
     setQuery(option.codigo)
     setShowOptions(false)
-    onSelect(option)
+    // Ensure we're passing the full option with all properties
+    onSelect({
+      codigo: option.codigo,
+      nombre: option.nombre,
+      precio_base: option.precio_base,
+      tiene_iva: option.tiene_iva
+    })
   }
 
   return (
