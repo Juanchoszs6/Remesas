@@ -56,11 +56,11 @@ export default function SiigoInvoiceForm() {
     const newItem: InvoiceItem = {
       id: Date.now().toString(),
       type: "product",
-      code: "GEN-" + Date.now().toString().slice(-6), // Default code for new items
-      description: "Producto genérico",
+      code: "", // Empty code by default, will be validated on submission
+      description: "", // Empty description by default
       quantity: 1,
       price: 0,
-      warehouse: sedeEnvio,
+      warehouse: sedeEnvio || "1", // Default warehouse if not set
       hasIVA: true,
     }
     setItems([...items, newItem])
@@ -184,40 +184,62 @@ export default function SiigoInvoiceForm() {
     return calculateSubtotal() + calculateIVA()
   }
 
-  const handleSubmitToSiigo = async (): Promise<void> => {
-    console.log('[INVOICE-FORM] Iniciando envío de factura de compra a Siigo');
+  const handleSubmitToSiigo = async () => {
     setIsSubmitting(true)
     setSubmitMessage('')
     
     try {
-      // Validaciones del lado del cliente
+      // Validar que se haya seleccionado un proveedor
       if (!selectedProvider) {
-        throw new Error('Debe seleccionar un proveedor');
+        throw new Error('Debe seleccionar un proveedor')
       }
       
+      // Validar que haya al menos un item
       if (items.length === 0) {
-        throw new Error('Debe agregar al menos un item a la factura');
+        throw new Error('Debe agregar al menos un item a la factura')
       }
       
       // Validar que todos los items tengan código y cantidad
-      for (const item of items) {
+      const validatedItems = items.map(item => {
+        // Create a copy of the item to avoid direct state mutation
+        const validatedItem = { ...item };
+        
         // If this is a generic product, assign a default code
-        if ((!item.code || !item.code.toString().trim()) && item.description === 'Producto genérico') {
-          updateItem(item.id, 'code', 'GEN-' + Date.now().toString().slice(-6));
-          continue;
+        if ((!validatedItem.code || !validatedItem.code.toString().trim()) && 
+            validatedItem.description === 'Producto genérico') {
+          validatedItem.code = 'GEN-' + Date.now().toString().slice(-6);
+          updateItem(validatedItem.id, 'code', validatedItem.code);
         }
         
-        // For all other items, ensure they have a valid code
-        if (!item.code || !item.code.toString().trim()) {
-          throw new Error(`El item "${item.description || 'Sin descripción'}" debe tener un código`);
+        // Validate code
+        if (!validatedItem.code || !validatedItem.code.toString().trim()) {
+          throw new Error(`El item "${validatedItem.description || 'Sin descripción'}" debe tener un código`);
         }
-        if (item.quantity <= 0) {
-          throw new Error(`El item "${item.code || 'Sin código'}" debe tener una cantidad mayor a 0`);
+        
+        // Validate quantity
+        if (isNaN(Number(validatedItem.quantity)) || Number(validatedItem.quantity) <= 0) {
+          throw new Error(`El item "${validatedItem.code}" debe tener una cantidad mayor a 0`);
         }
-        if (typeof item.price !== 'number' || isNaN(item.price) || item.price < 0) {
-          throw new Error(`El item "${item.code || 'Sin código'}" debe tener un precio válido`);
+        
+        // Ensure quantity is a number
+        validatedItem.quantity = Number(validatedItem.quantity);
+        
+        // Validate price
+        if (isNaN(Number(validatedItem.price)) || Number(validatedItem.price) < 0) {
+          throw new Error(`El item "${validatedItem.code}" debe tener un precio válido (mayor o igual a 0)`);
         }
-      }
+        
+        // Ensure price is a number
+        validatedItem.price = Number(validatedItem.price);
+        
+        return validatedItem;
+      });
+      
+      // Update items with validated values
+      validatedItems.forEach(item => {
+        updateItem(item.id, 'quantity', item.quantity);
+        updateItem(item.id, 'price', item.price);
+      });
       
       console.log('[INVOICE-FORM] Validaciones del cliente completadas');
       
@@ -269,36 +291,73 @@ export default function SiigoInvoiceForm() {
           body: JSON.stringify(datosFormulario)
         });
       } catch (fetchError) {
-        console.error('[INVOICE-FORM] Error en la petición fetch:', fetchError);
-        throw new Error(`Error de red: ${fetchError.message}`);
+        const errorMessage = fetchError instanceof Error 
+          ? `Error de red: ${fetchError.message}`
+          : 'Error desconocido al conectar con el servidor';
+        
+        console.error('[INVOICE-FORM] Error en la petición fetch:', {
+          error: fetchError,
+          message: errorMessage,
+          timestamp: new Date().toISOString()
+        });
+        
+        throw new Error(errorMessage);
       }
       
-      console.log(`[INVOICE-FORM] Respuesta recibida: Status ${response.status} ${response.statusText}`);
+      // Verificar si la respuesta es exitosa (código 2xx)
+      const isResponseSuccessful = response.ok; // response.ok es true para códigos 200-299
       
-      let responseText;
-      let responseData;
+      console.log(`[INVOICE-FORM] Respuesta recibida:`, {
+        status: response.status,
+        statusText: response.statusText,
+        url: response.url,
+        type: response.type,
+        redirected: response.redirected,
+        timestamp: new Date().toISOString()
+      });
+      
+      let responseText = '';
+      let responseData: any = null;
       
       try {
-        // Primero obtenemos el texto de la respuesta
+        // Obtener el texto de la respuesta
         responseText = await response.text();
         console.log('[INVOICE-FORM] Respuesta de texto cruda:', responseText);
         
-        // Intentamos parsear como JSON
-        if (responseText) {
+        // Intentar parsear como JSON si hay contenido
+        if (responseText && responseText.trim().length > 0) {
           try {
             responseData = JSON.parse(responseText);
             console.log('[INVOICE-FORM] Datos de respuesta parseados:', responseData);
           } catch (jsonError) {
-            console.warn('[INVOICE-FORM] La respuesta no es un JSON válido, usando texto plano');
-            responseData = { message: responseText };
+            console.warn('[INVOICE-FORM] La respuesta no es un JSON válido, usando texto plano', {
+              error: jsonError,
+              responseText: responseText.substring(0, 200) // Mostrar solo los primeros 200 caracteres
+            });
+            responseData = { 
+              message: 'Respuesta inesperada del servidor',
+              details: responseText.length > 200 ? responseText.substring(0, 200) + '...' : responseText
+            };
           }
-        } else {
-          console.warn('[INVOICE-FORM] La respuesta está vacía');
-          responseData = {};
+        } else if (!isResponseSuccessful) {
+          // Si la respuesta está vacía pero hay un error, crear un mensaje de error descriptivo
+          responseData = {
+            message: `Error ${response.status}: ${response.statusText || 'Error en la petición'}`,
+            status: response.status
+          };
         }
       } catch (error) {
-        console.error('[INVOICE-FORM] Error procesando la respuesta:', error);
-        throw new Error(`Error procesando la respuesta del servidor: ${error.message}`);
+        const errorMessage = error instanceof Error ? error.message : 'Error desconocido';
+        console.error('[INVOICE-FORM] Error procesando la respuesta:', {
+          error,
+          message: errorMessage,
+          responseText: responseText.substring(0, 500), // Limitar la longitud del log
+          status: response.status,
+          timestamp: new Date().toISOString()
+        });
+        
+        // Proporcionar un mensaje de error más amigable
+        throw new Error(`Error al procesar la respuesta del servidor (${response.status}): ${errorMessage}`);
       }
       
       // Si hay un error 400, mostrar más detalles
