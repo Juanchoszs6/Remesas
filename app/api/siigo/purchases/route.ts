@@ -186,10 +186,11 @@ export async function POST(request: NextRequest) {
     dueDate.setDate(dueDate.getDate() + 30); // Vencimiento a 30 días
 
     // 🎯 IDs y configuraciones fijas (ajusta según tu configuración en Siigo)
-    const DOCUMENT_ID = 1; // ID del tipo de documento en Siigo
+    // ⚠️ IMPORTANTE: Estos IDs deben existir en tu instancia de Siigo
+    const DOCUMENT_ID = 24446; // ID del tipo de documento compra en Siigo
     const COST_CENTER_ID = 235; // ID del centro de costos
-    const PAYMENT_METHOD_ID = 8468; // ID del método de pago
-    const IVA_TAX_ID = 13156; // ID del impuesto IVA en Siigo
+    const PAYMENT_METHOD_ID = 5636; // ID del método de pago (ejemplo: "Crédito")
+    const IVA_TAX_ID = 13156; // ID del impuesto IVA 19% en Siigo
 
     // 🧮 Preparar items para Siigo
     const ivaPercentage = body.ivaPercentage || 19;
@@ -242,7 +243,7 @@ export async function POST(request: NextRequest) {
         identification: body.selectedProvider.identification.trim(),
         branch_office: 0 // Sucursal principal
       },
-      cost_center: COST_CENTER_ID,
+      ...(COST_CENTER_ID && { cost_center: COST_CENTER_ID }), // Solo incluir si existe
       provider_invoice: {
         prefix: body.provider_invoice.prefix.trim(),
         number: body.provider_invoice.number.trim(),
@@ -266,6 +267,9 @@ export async function POST(request: NextRequest) {
       total: grandTotal,
       provider_invoice: siigoRequestBody.provider_invoice
     });
+
+    // 🔍 Log completo del payload para debugging
+    console.log("[PURCHASES] Payload completo a enviar a Siigo:", JSON.stringify(siigoRequestBody, null, 2));
 
     // 🚀 Envío a Siigo API
     const siigoResponse = await fetch("https://api.siigo.com/v1/purchases", {
@@ -306,17 +310,38 @@ export async function POST(request: NextRequest) {
         request: siigoRequestBody
       });
 
+      // 🔍 Log detallado para errores 400
+      if (siigoResponse.status === 400) {
+        console.error("[PURCHASES] Detalles del error 400:", {
+          url: "https://api.siigo.com/v1/purchases",
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${siigoToken.substring(0, 20)}...`,
+            "Partner-Id": partnerId
+          },
+          payload: JSON.stringify(siigoRequestBody, null, 2),
+          response_text: responseText,
+          response_parsed: siigoResult
+        });
+      }
+
       // Respuesta de error más específica
       const errorMessage = siigoResult?.error || 
                           siigoResult?.message || 
                           siigoResult?.errors?.[0]?.message ||
+                          siigoResult?.errors?.[0]?.error ||
                           `Error ${siigoResponse.status}: ${siigoResponse.statusText}`;
 
       return NextResponse.json({ 
         error: "Error al registrar la compra en Siigo",
         details: errorMessage,
         siigo_status: siigoResponse.status,
-        siigo_response: siigoResult
+        siigo_response: siigoResult,
+        debug_info: siigoResponse.status === 400 ? {
+          payload_sent: siigoRequestBody,
+          response_received: responseText
+        } : undefined
       }, { status: siigoResponse.status });
     }
 
