@@ -49,7 +49,7 @@ export default function SiigoInvoiceForm() {
   const [invoiceDate, setInvoiceDate] = useState<string>(new Date().toISOString().split('T')[0])
   const [observations, setObservations] = useState<string>('')
   const [costCenter, setCostCenter] = useState<string>('')
-  const [providerInvoicePrefix, setProviderInvoicePrefix] = useState<string>('')
+  const [providerInvoicePrefix, setProviderInvoicePrefix] = useState<string>('FAC')
   const [providerInvoiceNumber, setProviderInvoiceNumber] = useState<string>('')
 
   const addItem = () => {
@@ -189,6 +189,8 @@ export default function SiigoInvoiceForm() {
     setSubmitMessage('')
     
     try {
+      // ✅ VALIDACIONES PREVIAS
+      
       // Validar que se haya seleccionado un proveedor
       if (!selectedProvider) {
         throw new Error('Debe seleccionar un proveedor')
@@ -199,200 +201,154 @@ export default function SiigoInvoiceForm() {
         throw new Error('Debe agregar al menos un item a la factura')
       }
       
-      // Validar que todos los items tengan código y cantidad
-      const validatedItems = items.map(item => {
-        // Create a copy of the item to avoid direct state mutation
-        const validatedItem = { ...item };
-        
-        // If this is a generic product, assign a default code
-        if ((!validatedItem.code || !validatedItem.code.toString().trim()) && 
-            validatedItem.description === 'Producto genérico') {
-          validatedItem.code = 'GEN-' + Date.now().toString().slice(-6);
-          updateItem(validatedItem.id, 'code', validatedItem.code);
-        }
-        
-        // Validate code
-        if (!validatedItem.code || !validatedItem.code.toString().trim()) {
-          throw new Error(`El item "${validatedItem.description || 'Sin descripción'}" debe tener un código`);
-        }
-        
-        // Validate quantity
-        if (isNaN(Number(validatedItem.quantity)) || Number(validatedItem.quantity) <= 0) {
-          throw new Error(`El item "${validatedItem.code}" debe tener una cantidad mayor a 0`);
-        }
-        
-        // Ensure quantity is a number
-        validatedItem.quantity = Number(validatedItem.quantity);
-        
-        // Validate price
-        if (isNaN(Number(validatedItem.price)) || Number(validatedItem.price) < 0) {
-          throw new Error(`El item "${validatedItem.code}" debe tener un precio válido (mayor o igual a 0)`);
-        }
-        
-        // Ensure price is a number
-        validatedItem.price = Number(validatedItem.price);
-        
-        return validatedItem;
-      });
+      // Validar provider_invoice campos requeridos
+      if (!providerInvoicePrefix.trim()) {
+        throw new Error('El prefijo de la factura del proveedor es obligatorio')
+      }
       
-      // Update items with validated values
-      validatedItems.forEach(item => {
-        updateItem(item.id, 'quantity', item.quantity);
-        updateItem(item.id, 'price', item.price);
-      });
+      if (!providerInvoiceNumber.trim()) {
+        throw new Error('El número de la factura del proveedor es obligatorio')
+      }
+      
+      if (!invoiceDate) {
+        throw new Error('La fecha de la factura es obligatoria')
+      }
+      
+      // Validar que todos los items tengan código, descripción y cantidad
+      const validatedItems: InvoiceItem[] = []
+      
+      for (const item of items) {
+        // Validar código
+        if (!item.code || !item.code.toString().trim()) {
+          throw new Error(`El item "${item.description || 'Sin descripción'}" debe tener un código`)
+        }
+        
+        // Validar descripción
+        if (!item.description || !item.description.trim()) {
+          throw new Error(`El item con código "${item.code}" debe tener una descripción`)
+        }
+        
+        // Validar cantidad
+        const quantity = Number(item.quantity)
+        if (isNaN(quantity) || quantity <= 0) {
+          throw new Error(`El item "${item.code}" debe tener una cantidad mayor a 0`)
+        }
+        
+        // Validar precio
+        const price = Number(item.price)
+        if (isNaN(price) || price < 0) {
+          throw new Error(`El item "${item.code}" debe tener un precio válido (mayor o igual a 0)`)
+        }
+        
+        // Crear item validado
+        validatedItems.push({
+          ...item,
+          quantity,
+          price,
+          code: item.code.toString().trim(),
+          description: item.description.trim(),
+          warehouse: item.warehouse || sedeEnvio || "1"
+        })
+      }
       
       console.log('[INVOICE-FORM] Validaciones del cliente completadas');
       
-      // Preparar datos del formulario
-      const datosFormulario: FormData = {
-        selectedProvider,
-        items,
-        sedeEnvio,
+      // ✅ CONSTRUCCIÓN DEL PAYLOAD EXACTO PARA EL BACKEND
+      
+      const payload = {
+        // Proveedor seleccionado
+        selectedProvider: {
+          identification: selectedProvider.identification,
+          name: selectedProvider.name
+        },
+        
+        // Items validados
+        items: validatedItems.map(item => ({
+          code: item.code,
+          description: item.description,
+          quantity: item.quantity,
+          price: item.price,
+          hasIVA: item.hasIVA,
+          warehouse: item.warehouse,
+          type: item.type
+        })),
+        
+        // ✅ CAMPOS REQUERIDOS por el backend
+        provider_invoice: {
+          prefix: providerInvoicePrefix.trim(),
+          number: providerInvoiceNumber.trim(),
+          date: invoiceDate // Ya está en formato YYYY-MM-DD
+        },
+        
+        // Configuración de IVA
         hasIVA,
         ivaPercentage,
-        observations: observations || 'Factura de compra generada desde formulario web'
+        
+        // Campos opcionales
+        observations: observations?.trim() || 'Factura de compra generada desde formulario web',
+        sedeEnvio: sedeEnvio || "1"
       }
       
       console.log('[INVOICE-FORM] Datos del formulario preparados:', {
         proveedor: selectedProvider.identification,
-        itemsCount: items.length,
-        total: calculateTotal()
+        itemsCount: validatedItems.length,
+        total: calculateTotal(),
+        provider_invoice: payload.provider_invoice
       });
       
-      // Enviar a la nueva API de facturas de compra
-      console.log('[INVOICE-FORM] Enviando petición a /api/siigo/purchases', {
-        datosFormulario: {
-          ...datosFormulario,
-          // No incluir el objeto completo del proveedor para no saturar los logs
-          selectedProvider: datosFormulario.selectedProvider ? {
-            identification: datosFormulario.selectedProvider.identification,
-            name: datosFormulario.selectedProvider.name
-          } : null,
-          items: datosFormulario.items.map(item => ({
-            id: item.id,
-            type: item.type,
-            code: item.code,
-            description: item.description,
-            quantity: item.quantity,
-            price: item.price,
-            hasIVA: item.hasIVA,
-            warehouse: item.warehouse
-          }))
-        }
+      // ✅ ENVÍO AL BACKEND
+      console.log('[INVOICE-FORM] Enviando petición a /api/siigo/purchases');
+      
+      const response = await fetch('/api/siigo/purchases', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload)
       });
-      
-      let response;
-      try {
-        response = await fetch('/api/siigo/purchases', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(datosFormulario)
-        });
-      } catch (fetchError) {
-        const errorMessage = fetchError instanceof Error 
-          ? `Error de red: ${fetchError.message}`
-          : 'Error desconocido al conectar con el servidor';
-        
-        console.error('[INVOICE-FORM] Error en la petición fetch:', {
-          error: fetchError,
-          message: errorMessage,
-          timestamp: new Date().toISOString()
-        });
-        
-        throw new Error(errorMessage);
-      }
-      
-      // Verificar si la respuesta es exitosa (código 2xx)
-      const isResponseSuccessful = response.ok; // response.ok es true para códigos 200-299
       
       console.log(`[INVOICE-FORM] Respuesta recibida:`, {
         status: response.status,
         statusText: response.statusText,
-        url: response.url,
-        type: response.type,
-        redirected: response.redirected,
+        ok: response.ok,
         timestamp: new Date().toISOString()
       });
       
-      let responseText = '';
+      // ✅ MANEJO DE LA RESPUESTA
       let responseData: any = null;
+      const responseText = await response.text();
       
-      try {
-        // Obtener el texto de la respuesta
-        responseText = await response.text();
-        console.log('[INVOICE-FORM] Respuesta de texto cruda:', responseText);
-        
-        // Intentar parsear como JSON si hay contenido
-        if (responseText && responseText.trim().length > 0) {
-          try {
-            responseData = JSON.parse(responseText);
-            console.log('[INVOICE-FORM] Datos de respuesta parseados:', responseData);
-          } catch (jsonError) {
-            console.warn('[INVOICE-FORM] La respuesta no es un JSON válido, usando texto plano', {
-              error: jsonError,
-              responseText: responseText.substring(0, 200) // Mostrar solo los primeros 200 caracteres
-            });
-            responseData = { 
-              message: 'Respuesta inesperada del servidor',
-              details: responseText.length > 200 ? responseText.substring(0, 200) + '...' : responseText
-            };
-          }
-        } else if (!isResponseSuccessful) {
-          // Si la respuesta está vacía pero hay un error, crear un mensaje de error descriptivo
-          responseData = {
-            message: `Error ${response.status}: ${response.statusText || 'Error en la petición'}`,
-            status: response.status
+      if (responseText && responseText.trim().length > 0) {
+        try {
+          responseData = JSON.parse(responseText);
+        } catch (jsonError) {
+          console.warn('[INVOICE-FORM] Respuesta no es JSON válido:', responseText.substring(0, 200));
+          responseData = { 
+            message: 'Respuesta inesperada del servidor',
+            details: responseText.length > 200 ? responseText.substring(0, 200) + '...' : responseText
           };
         }
-      } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : 'Error desconocido';
-        console.error('[INVOICE-FORM] Error procesando la respuesta:', {
-          error,
-          message: errorMessage,
-          responseText: responseText.substring(0, 500), // Limitar la longitud del log
-          status: response.status,
-          timestamp: new Date().toISOString()
-        });
-        
-        // Proporcionar un mensaje de error más amigable
-        throw new Error(`Error al procesar la respuesta del servidor (${response.status}): ${errorMessage}`);
       }
       
-      // Si hay un error 400, mostrar más detalles
-      if (response.status === 400) {
-        console.error('[INVOICE-FORM] Error 400 - Detalles de la petición:', {
-          url: '/api/siigo/purchases',
-          method: 'POST',
-          status: response.status,
-          statusText: response.statusText,
-          headers: Object.fromEntries(response.headers.entries()),
-          body: responseText
-        });
-      }
-      
-      if (response.ok && responseData?.success) {
-        setSubmitMessage(`✅ Factura de compra creada exitosamente en Siigo. ${responseData.message || ''}`.trim());
-        console.log('[INVOICE-FORM] Factura creada exitosamente:', responseData.data);
+      if (response.ok) {
+        // ✅ ÉXITO
+        setSubmitMessage(`✅ Factura de compra creada exitosamente en Siigo. ${responseData?.message || 'Operación completada correctamente.'}`.trim());
+        console.log('[INVOICE-FORM] Factura creada exitosamente:', responseData);
         
-        // Opcional: Limpiar formulario después del envío exitoso
+        // Opcional: Limpiar campos después del envío exitoso
         // resetForm()
       } else {
+        // ❌ ERROR
         const errorMessage = responseData?.error || 
                            responseData?.message || 
+                           responseData?.details ||
                            `Error del servidor: ${response.status} ${response.statusText}`;
         
         console.error('[INVOICE-FORM] Error en la respuesta:', {
           status: response.status,
           statusText: response.statusText,
           responseData,
-          requestData: {
-            provider: selectedProvider?.identification,
-            itemsCount: items.length,
-            hasIVA,
-            ivaPercentage
-          }
+          payload
         });
         
         throw new Error(errorMessage);
@@ -401,26 +357,15 @@ export default function SiigoInvoiceForm() {
     } catch (error) {
       console.error('[INVOICE-FORM] Error enviando factura:', error);
       
-      // Extraer el mensaje de error de la respuesta de la API si está disponible
       let errorMessage = 'Error desconocido al enviar la factura';
       
       if (error instanceof Error) {
         errorMessage = error.message;
-        
-        // Intentar extraer más información del error de la respuesta de la API
-        try {
-          const errorData = JSON.parse(error.message);
-          if (errorData?.message) {
-            errorMessage = errorData.message;
-          }
-        } catch (e) {
-          // Si no se puede parsear como JSON, usar el mensaje de error original
-        }
       }
       
       setSubmitMessage(`❌ Error: ${errorMessage}`);
       
-      // Mostrar un mensaje más detallado en la consola
+      // Log detallado para debugging
       console.error('[INVOICE-FORM] Detalles del error:', {
         error,
         items: items.map(item => ({
@@ -432,7 +377,12 @@ export default function SiigoInvoiceForm() {
         })),
         provider: selectedProvider,
         hasIVA,
-        ivaPercentage
+        ivaPercentage,
+        provider_invoice: {
+          prefix: providerInvoicePrefix,
+          number: providerInvoiceNumber,
+          date: invoiceDate
+        }
       });
     } finally {
       setIsSubmitting(false)
@@ -481,6 +431,10 @@ export default function SiigoInvoiceForm() {
                       <li className="flex items-start gap-2">
                         <span className="text-red-500 font-bold">•</span>
                         <span><strong>Sede de Envío:</strong> Bodega desde donde se envían los productos</span>
+                      </li>
+                      <li className="flex items-start gap-2">
+                        <span className="text-red-500 font-bold">•</span>
+                        <span><strong>Prefijo y Número:</strong> De la factura del proveedor</span>
                       </li>
                     </ul>
                   </div>
@@ -650,10 +604,29 @@ export default function SiigoInvoiceForm() {
           </CardHeader>
           <CardContent className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             <div className="space-y-2">
-              <Label htmlFor="document-id">
-                ID Documento <span className="text-red-500">*</span>
+              <Label htmlFor="provider-invoice-prefix">
+                Prefijo Factura Proveedor <span className="text-red-500">*</span>
               </Label>
-              <Input id="document-id" placeholder="Identificador del comprobante" required />
+              <Input 
+                id="provider-invoice-prefix" 
+                placeholder="Ej: FAC, FV, etc."
+                value={providerInvoicePrefix}
+                onChange={(e) => setProviderInvoicePrefix(e.target.value)}
+                required 
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="provider-invoice-number">
+                Número Factura Proveedor <span className="text-red-500">*</span>
+              </Label>
+              <Input 
+                id="provider-invoice-number" 
+                placeholder="Número de la factura del proveedor"
+                value={providerInvoiceNumber}
+                onChange={(e) => setProviderInvoiceNumber(e.target.value)}
+                required 
+              />
             </div>
 
             <div className="space-y-2">
@@ -669,11 +642,9 @@ export default function SiigoInvoiceForm() {
               />
             </div>
 
-
-
             <div className="space-y-2">
               <Autocomplete
-                label="Código"
+                label="Código Proveedor"
                 placeholder="Buscar por código o nombre del proveedor..."
                 apiEndpoint="/api/proveedores"
                 value={providerCode}
@@ -738,7 +709,6 @@ export default function SiigoInvoiceForm() {
               </p>
             </div>
 
-
           </CardContent>
         </Card>
 
@@ -773,71 +743,70 @@ export default function SiigoInvoiceForm() {
                   <div className="space-y-2">
                     <Label>Tipo de Item</Label>
                     <Select value={item.type} onValueChange={(value) => updateItem(item.id, "type", value as InvoiceItem["type"])}>
-  <SelectTrigger>
-    <SelectValue />
-  </SelectTrigger>
-  <SelectContent>
-    <SelectItem value="product">🛍️ Producto</SelectItem>
-    <SelectItem value="activos_fijos">🏢 Activo Fijo</SelectItem>
-    <SelectItem value="charge">💼 Cuenta contable</SelectItem>
-  </SelectContent>
-</Select>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="product">🛍️ Producto</SelectItem>
+                        <SelectItem value="activos_fijos">🏢 Activo Fijo</SelectItem>
+                        <SelectItem value="charge">💼 Cuenta contable</SelectItem>
+                      </SelectContent>
+                    </Select>
                   </div>
 
                   <div className="space-y-2">
                     {item.type === "product" && (
-  <Autocomplete
-    label="Código Producto"
-    placeholder="Buscar producto por código o nombre..."
-    apiEndpoint="/api/productos-lista"
-    value={item.code}
-    onSelect={(option) => handleProductSelect(item.id, option)}
-    onInputChange={(value) => {
-      // Update just the code when typing
-      updateItem(item.id, "code", value);
-      if (!value) {
-        // Clear description if code is cleared
-        updateItem(item.id, "description", "");
-      }
-    }}
-    required
-  />
-)}
-{item.type === "activos_fijos" && (
-  <Autocomplete
-    label="Código Activo Fijo"
-    placeholder="Buscar activo por código o nombre..."
-    apiEndpoint="/api/activos-fijos"
-    value={item.code}
-    onSelect={(option) => {
-      updateItem(item.id, "code", option.codigo);
-      updateItem(item.id, "description", option.nombre);
-    }}
-    required
-    readOnlyInput
-  />
-)}
-{item.type === "charge" && (
-  <Autocomplete
-    label="Cuenta contable"
-    placeholder="Escribe código o nombre de cuenta..."
-    apiEndpoint="/api/gastos_cuentas_contables"
-    value={item.code}
-    onSelect={(cuenta) => {
-      updateItem(item.id, "code", cuenta.codigo);
-      updateItem(item.id, "description", cuenta.nombre);
-    }}
-    onInputChange={(code) => {
-      // Opcional: limpiar descripción mientras escribe
-      updateItem(item.id, "code", code);
-      if (!code) {
-        updateItem(item.id, "description", "");
-      }
-    }}
-    required
-    // 👈 ELIMINAR readOnlyInput={true} para permitir escritura
-  />
-)}
+                      <Autocomplete
+                        label="Código Producto"
+                        placeholder="Buscar producto por código o nombre..."
+                        apiEndpoint="/api/productos-lista"
+                        value={item.code}
+                        onSelect={(option) => handleProductSelect(item.id, option)}
+                        onInputChange={(value) => {
+                          // Update just the code when typing
+                          updateItem(item.id, "code", value);
+                          if (!value) {
+                            // Clear description if code is cleared
+                            updateItem(item.id, "description", "");
+                          }
+                        }}
+                        required
+                      />
+                    )}
+                    {item.type === "activos_fijos" && (
+                      <Autocomplete
+                        label="Código Activo Fijo"
+                        placeholder="Buscar activo por código o nombre..."
+                        apiEndpoint="/api/activos-fijos"
+                        value={item.code}
+                        onSelect={(option) => {
+                          updateItem(item.id, "code", option.codigo);
+                          updateItem(item.id, "description", option.nombre);
+                        }}
+                        required
+                        readOnlyInput
+                      />
+                    )}
+                    {item.type === "charge" && (
+                      <Autocomplete
+                        label="Cuenta contable"
+                        placeholder="Escribe código o nombre de cuenta..."
+                        apiEndpoint="/api/gastos_cuentas_contables"
+                        value={item.code}
+                        onSelect={(cuenta) => {
+                          updateItem(item.id, "code", cuenta.codigo);
+                          updateItem(item.id, "description", cuenta.nombre);
+                        }}
+                        onInputChange={(code) => {
+                          // Opcional: limpiar descripción mientras escribe
+                          updateItem(item.id, "code", code);
+                          if (!code) {
+                            updateItem(item.id, "description", "");
+                          }
+                        }}
+                        required
+                      />
+                    )}
                   </div>
 
                   <div className="space-y-2">
@@ -975,7 +944,7 @@ export default function SiigoInvoiceForm() {
               <Label htmlFor="payment-value">Valor Total del Pago</Label>
               <Input
                 id="payment-value"
-                value={`$${calculateTotal().toLocaleString("es-CO", { minimumFractionDigits: 2 })} COP`}
+                value={`${calculateTotal().toLocaleString("es-CO", { minimumFractionDigits: 2 })} COP`}
                 readOnly
                 className="bg-muted font-medium"
               />
@@ -1039,7 +1008,7 @@ export default function SiigoInvoiceForm() {
             size="lg" 
             className="bg-blue-600 hover:bg-blue-700 flex items-center gap-2"
             onClick={handleSubmitToSiigo}
-            disabled={isSubmitting || !selectedProvider || items.length === 0}
+            disabled={isSubmitting || !selectedProvider || items.length === 0 || !providerInvoicePrefix.trim() || !providerInvoiceNumber.trim()}
           >
             {isSubmitting ? (
               <>
