@@ -51,9 +51,9 @@ export function InvoiceItemForm({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="product">🛍️ Producto</SelectItem>
-              <SelectItem value="activos_fijos">🏢 Activo Fijo</SelectItem>
-              <SelectItem value="charge">💼 Cuenta contable</SelectItem>
+              <SelectItem value="Product">🛍️ Producto</SelectItem>
+              <SelectItem value="FixedAsset">🏢 Activo Fijo</SelectItem>
+              <SelectItem value="Account">💼 Cuenta contable</SelectItem>
             </SelectContent>
           </Select>
         </div>

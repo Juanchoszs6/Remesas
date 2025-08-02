@@ -9,6 +9,7 @@ import { Plus, Send, Trash2 } from "lucide-react"
 import { Autocomplete } from "@/components/autocomplete"
 import { InvoiceItemForm } from "@/components/invoice/InvoiceItemForm"
 import { InvoiceItem, Provider } from "@/types/siigo"
+import { toast } from "sonner"
 
 type InvoiceFormState = {
   items: InvoiceItem[]
@@ -122,6 +123,7 @@ export function InvoiceForm() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setIsSubmitting(true)
+    setSubmitMessage('')
     
     try {
       // Validaciones básicas
@@ -133,39 +135,92 @@ export function InvoiceForm() {
         throw new Error('Debe agregar al menos un ítem')
       }
 
-      // Construir payload para la API
-      const payload = {
-        provider: state.provider,
-        items: state.items,
-        invoiceDate: state.invoiceDate,
-        providerInvoicePrefix: state.providerInvoicePrefix,
-        providerInvoiceNumber: state.providerInvoiceNumber,
-        observations: state.observations,
-        ivaPercentage: state.ivaPercentage,
+      if (!state.providerInvoiceNumber) {
+        throw new Error('El número de factura es requerido')
       }
 
-      // Aquí iría la llamada a la API
-      console.log('Enviando factura:', payload)
+      // Construir payload para la API de Siigo
+      const payload = {
+        document_id: 1, // ID del documento en Siigo (deberías obtenerlo de la configuración)
+        fecha: state.invoiceDate,
+        proveedor_nit: state.provider.identification,
+        centro_costo_id: 1, // ID del centro de costos (deberías obtenerlo de la configuración)
+        prefijo_factura_proveedor: state.providerInvoicePrefix,
+        numero_factura_proveedor: state.providerInvoiceNumber,
+        codigo_moneda: 'COP', // Moneda por defecto
+        tasa_cambio: 1, // Tasa de cambio por defecto
+        observaciones: state.observations,
+        items: state.items.map(item => ({
+          tipo: item.type,
+          codigo: item.code || 'ITEM-' + Math.random().toString(36).substr(2, 9).toUpperCase(),
+          descripcion: item.description || 'Producto sin descripción',
+          cantidad: item.quantity,
+          precio: item.price,
+          impuestos_id: item.hasIVA ? [1] : [] // ID del impuesto IVA en Siigo (deberías obtenerlo de la configuración)
+        })),
+        pagos: [{
+          id: 1, // ID del método de pago en Siigo (deberías obtenerlo de la configuración)
+          valor: calculateTotal(state.items, state.ivaPercentage),
+          fecha_vencimiento: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0] // 30 días a partir de hoy
+        }]
+      };
+
+      console.log('Enviando factura a Siigo:', payload);
       
-      // Simular envío
-      await new Promise(resolve => setTimeout(resolve, 1000))
+      // Llamada a la API
+      const response = await fetch('/api/siigo/create-purchase', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        console.error('Error en la respuesta de la API:', data);
+        throw new Error(data.error || 'Error al enviar la factura a Siigo');
+      }
       
-      setSubmitMessage('✅ Factura enviada correctamente')
+      // Mostrar mensaje de éxito
+      toast.success('✅ Factura enviada correctamente a Siigo', {
+        description: 'Puedes ver el resultado en tu panel de Siigo.',
+        duration: 4000,
+      });
+      // Reiniciar el formulario después de un envío exitoso
+      dispatch({
+        type: 'UPDATE_FIELD',
+        payload: { field: 'providerInvoiceNumber', value: '' }
+      });
     } catch (error) {
-      let errorMessage = 'Error desconocido';
+      console.error('Error al enviar la factura:', error);
+      let errorMessage = 'Error desconocido al enviar la factura';
       if (error instanceof Error) {
         errorMessage = error.message;
       } else if (typeof error === 'string') {
         errorMessage = error;
+      } else if (error && typeof error === 'object' && 'message' in error) {
+        errorMessage = String(error.message);
       }
-      setSubmitMessage(`❌ Error: ${errorMessage}`);
+      toast.error(`❌ Error al enviar la factura: ${errorMessage}`, {
+        description: 'Revisa los datos y tu conexión con Siigo.',
+        duration: 4000,
+      });
     } finally {
-      setIsSubmitting(false)
+      setIsSubmitting(false);
     }
   }
 
   return (
     <div className="max-w-6xl mx-auto p-6 space-y-6">
+      {submitMessage && (
+        <div className={`p-4 rounded-md ${
+          submitMessage.startsWith('✅') ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+        }`}>
+          {submitMessage}
+        </div>
+      )}
       <form onSubmit={handleSubmit} className="space-y-6">
         {/* Sección de información general */}
         <Card>
@@ -220,29 +275,6 @@ export function InvoiceForm() {
                   payload: { field: 'invoiceDate', value: e.target.value }
                 })}
                 required 
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label>
-                Código Proveedor <span className="text-red-500">*</span>
-              </Label>
-              <Autocomplete
-                label=""
-                placeholder="Buscar proveedor..."
-                apiEndpoint="/api/proveedores"
-                value={state.providerCode}
-                onSelect={handleProviderSelect}
-                required
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label>Identificación</Label>
-              <Input
-                value={state.providerIdentification}
-                readOnly
-                className="bg-muted"
               />
             </div>
           </CardContent>
@@ -313,32 +345,12 @@ export function InvoiceForm() {
           <Button 
             type="submit"
             size="lg"
-            className="bg-blue-600 hover:bg-blue-700 flex items-center gap-2"
             disabled={isSubmitting}
           >
-            {isSubmitting ? (
-              <>
-                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                Enviando...
-              </>
-            ) : (
-              <>
-                <Send className="h-4 w-4" />
-                Enviar Factura
-              </>
-            )}
+            <Send className="mr-2 h-4 w-4" />
+            {isSubmitting ? 'Enviando a Siigo...' : 'Enviar Factura a Siigo'}
           </Button>
         </div>
-
-        {submitMessage && (
-          <div className={`p-4 rounded-lg ${
-            submitMessage.startsWith('✅') 
-              ? 'bg-green-50 text-green-800 border border-green-200' 
-              : 'bg-red-50 text-red-800 border border-red-200'
-          }`}>
-            <p className="text-sm font-medium">{submitMessage}</p>
-          </div>
-        )}
       </form>
     </div>
   )
