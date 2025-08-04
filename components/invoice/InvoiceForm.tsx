@@ -27,7 +27,6 @@ interface InvoiceState {
   providerIdentification: string;
   providerInvoicePrefix: string;
 }
-gi
 type InvoiceFormAction =
   | { type: 'ADD_ITEM'; payload: InvoiceItem }
   | { type: 'REMOVE_ITEM'; payload: string }
