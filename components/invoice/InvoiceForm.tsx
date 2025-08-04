@@ -1,23 +1,8 @@
-<<<<<<< HEAD
-import { useReducer, useCallback, useState } from "react"
-import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { Textarea } from "@/components/ui/textarea"
-import { Separator } from "@/components/ui/separator"
-import { Plus, Send, Trash2 } from "lucide-react"
-import { Autocomplete } from "@/components/autocomplete"
-import { InvoiceItemForm } from "@/components/invoice/InvoiceItemForm"
-import { InvoiceItem, Provider } from "@/types/siigo"
-import { toast } from "sonner"
-=======
 import { useReducer, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
 import { InvoiceItemForm } from "@/components/invoice/InvoiceItemForm";
@@ -25,7 +10,7 @@ import { InvoiceItem, Provider } from "@/types/siigo";
 import { Plus, Send } from 'lucide-react';
 import { Separator } from '@/components/ui/separator';
 import { Autocomplete } from '@/components/autocomplete';
->>>>>>> cb6efe6 (Id cufe,id documento listo falta demas)
+import { useRouter } from 'next/navigation';
 
 interface InvoiceState {
   provider: {
@@ -42,7 +27,7 @@ interface InvoiceState {
   providerIdentification: string;
   providerInvoicePrefix: string;
 }
-
+gi
 type InvoiceFormAction =
   | { type: 'ADD_ITEM'; payload: InvoiceItem }
   | { type: 'REMOVE_ITEM'; payload: string }
@@ -141,7 +126,8 @@ function invoiceFormReducer(state: InvoiceState, action: InvoiceFormAction): Inv
 }
 
 export function InvoiceForm() {
-  const [state, dispatch] = useReducer(invoiceFormReducer, initialState)
+  const router = useRouter();
+  const [state, dispatch] = useReducer(invoiceFormReducer, initialState);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitMessage, setSubmitMessage] = useState('');
 
@@ -169,63 +155,56 @@ export function InvoiceForm() {
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
-<<<<<<< HEAD
-    e.preventDefault()
-    setIsSubmitting(true)
-    setSubmitMessage('')
-=======
     e.preventDefault();
     setIsSubmitting(true);
->>>>>>> cb6efe6 (Id cufe,id documento listo falta demas)
     
     try {
       if (!state.provider) {
         throw new Error('Debe seleccionar un proveedor');
       }
 
-      if (!state.documentId) {
-        throw new Error('Debe ingresar el número de factura');
+      if (!state.providerInvoiceNumber) {
+        throw new Error('El número de factura es requerido');
       }
 
       if (state.items.length === 0) {
         throw new Error('Debe agregar al menos un ítem');
       }
 
-<<<<<<< HEAD
-      if (!state.providerInvoiceNumber) {
-        throw new Error('El número de factura es requerido')
-      }
-
-      // Construir payload para la API de Siigo
+      // Construir el payload para la API de Siigo
       const payload = {
-        document_id: 1, // ID del documento en Siigo (deberías obtenerlo de la configuración)
-        fecha: state.invoiceDate,
-        proveedor_nit: state.provider.identification,
-        centro_costo_id: 1, // ID del centro de costos (deberías obtenerlo de la configuración)
-        prefijo_factura_proveedor: state.providerInvoicePrefix,
-        numero_factura_proveedor: state.providerInvoiceNumber,
-        codigo_moneda: 'COP', // Moneda por defecto
-        tasa_cambio: 1, // Tasa de cambio por defecto
-        observaciones: state.observations,
+        provider: {
+          identificacion: state.provider.identification,
+          nombre: state.provider.name,
+          tipo_documento: 'NIT', // Ajustar según el tipo de documento del proveedor
+          nombre_comercial: state.provider.name,
+          ciudad: '', // Ajustar según sea necesario
+          direccion: '', // Ajustar según sea necesario
+          telefono: '', // Ajustar según sea necesario
+          correo_electronico: '' // Ajustar según sea necesario
+        },
         items: state.items.map(item => ({
-          tipo: item.type,
-          codigo: item.code || 'ITEM-' + Math.random().toString(36).substr(2, 9).toUpperCase(),
-          descripcion: item.description || 'Producto sin descripción',
-          cantidad: item.quantity,
-          precio: item.price,
-          impuestos_id: item.hasIVA ? [1] : [] // ID del impuesto IVA en Siigo (deberías obtenerlo de la configuración)
+          id: item.id,
+          type: item.type,
+          code: item.code,
+          description: item.description,
+          quantity: Number(item.quantity),
+          price: Number(item.price),
+          hasIVA: item.hasIVA,
+          discount: item.discount
         })),
-        pagos: [{
-          id: 1, // ID del método de pago en Siigo (deberías obtenerlo de la configuración)
-          valor: calculateTotal(state.items, state.ivaPercentage),
-          fecha_vencimiento: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0] // 30 días a partir de hoy
-        }]
+        documentId: state.documentId,
+        providerInvoiceNumber: state.providerInvoiceNumber,
+        providerInvoicePrefix: state.providerInvoicePrefix || 'FV1',
+        invoiceDate: state.invoiceDate || new Date().toISOString().split('T')[0],
+        observations: state.observations,
+        ivaPercentage: state.ivaPercentage || 19
       };
 
       console.log('Enviando factura a Siigo:', payload);
       
       // Llamada a la API
-      const response = await fetch('/api/siigo/create-purchase', {
+      const response = await fetch('/api/siigo/purchases', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -236,8 +215,6 @@ export function InvoiceForm() {
       const data = await response.json();
 
       if (!response.ok) {
-
-        
         console.error('Error en la respuesta de la API:', data);
         throw new Error(data.error || 'Error al enviar la factura a Siigo');
       }
@@ -247,11 +224,17 @@ export function InvoiceForm() {
         description: 'Puedes ver el resultado en tu panel de Siigo.',
         duration: 4000,
       });
-      // Reiniciar el formulario después de un envío exitoso
-      dispatch({
-        type: 'UPDATE_FIELD',
-        payload: { field: 'providerInvoiceNumber', value: '' }
-      });
+      
+      // Limpiar el formulario después de un envío exitoso
+      dispatch({ type: 'SET_PROVIDER', payload: null });
+      dispatch({ type: 'SET_DOCUMENT_ID', payload: '' });
+      dispatch({ type: 'SET_PROVIDER_INVOICE_NUMBER', payload: '' });
+      dispatch({ type: 'UPDATE_FIELD', payload: { field: 'items', value: [] } });
+      dispatch({ type: 'UPDATE_FIELD', payload: { field: 'observations', value: '' } });
+      
+      // Recargar la página para limpiar el estado
+      router.refresh();
+      
     } catch (error) {
       console.error('Error al enviar la factura:', error);
       let errorMessage = 'Error desconocido al enviar la factura';
@@ -266,49 +249,6 @@ export function InvoiceForm() {
         description: 'Revisa los datos y tu conexión con Siigo.',
         duration: 4000,
       });
-=======
-      const response = await fetch('/api/siigo/purchases', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          provider: {
-            identification: state.provider.identification,
-            name: state.provider.name,
-            branch_office: 0
-          },
-          items: state.items.map(item => ({
-            ...item,
-            quantity: Number(item.quantity),
-            price: Number(item.price),
-          })),
-          documentId: state.documentId,
-          providerInvoiceNumber: state.providerInvoiceNumber,
-          invoiceDate: state.invoiceDate,
-          observations: state.observations,
-          ivaPercentage: state.ivaPercentage,
-        }),
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.message || 'Error al guardar la factura');
-      }
-
-      const data = await response.json();
-      toast.success('Factura guardada exitosamente');
-      
-      // Limpiar el formulario después de un envío exitoso
-      dispatch({ type: 'SET_PROVIDER', payload: null });
-      dispatch({ type: 'SET_DOCUMENT_ID', payload: '' });
-      dispatch({ type: 'SET_PROVIDER_INVOICE_NUMBER', payload: '' });
-      // ... limpiar otros campos según sea necesario
-      
-    } catch (error: any) {
-      console.error('Error al guardar la factura:', error);
-      toast.error(error.message || 'Error al guardar la factura');
->>>>>>> cb6efe6 (Id cufe,id documento listo falta demas)
     } finally {
       setIsSubmitting(false);
     }
@@ -331,7 +271,7 @@ export function InvoiceForm() {
               Información General
             </CardTitle>
           </CardHeader>
-          <div className="grid grid-cols-1 gap-4">
+          <CardContent className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="document-id">Número de Factura</Label>
               <Input
@@ -391,6 +331,7 @@ export function InvoiceForm() {
                 variant="outline" 
                 size="sm"
                 onClick={handleAddItem}
+                disabled={isSubmitting}
               >
                 <Plus className="h-4 w-4 mr-2" />
                 Agregar Ítem
@@ -398,20 +339,38 @@ export function InvoiceForm() {
             </div>
           </CardHeader>
           <CardContent className="space-y-4">
-            {state.items.map((item, index) => (
-              <InvoiceItemForm
-                key={item.id}
-                item={item}
-                index={index}
-                isLastItem={index === state.items.length - 1}
-                onUpdate={(id, field, value) => dispatch({
-                  type: 'UPDATE_ITEM',
-                  payload: { id, field, value }
-                })}
-                onRemove={(id) => dispatch({ type: 'REMOVE_ITEM', payload: id })}
-                ivaPercentage={state.ivaPercentage}
-              />
-            ))}
+            {state.items.length === 0 ? (
+              <div className="text-center py-8 text-muted-foreground">
+                <p>No hay ítems en la factura</p>
+                <Button 
+                  type="button" 
+                  variant="ghost" 
+                  size="sm"
+                  onClick={handleAddItem}
+                  className="mt-2"
+                  disabled={isSubmitting}
+                >
+                  <Plus className="h-4 w-4 mr-2" />
+                  Agregar primer ítem
+                </Button>
+              </div>
+            ) : (
+              state.items.map((item, index) => (
+                <InvoiceItemForm
+                  key={item.id}
+                  item={item}
+                  index={index}
+                  isLastItem={index === state.items.length - 1}
+                  onUpdate={(id, field, value) => dispatch({
+                    type: 'UPDATE_ITEM',
+                    payload: { id, field, value }
+                  })}
+                  onRemove={(id) => dispatch({ type: 'REMOVE_ITEM', payload: id })}
+                  ivaPercentage={state.ivaPercentage}
+                  disabled={isSubmitting}
+                />
+              ))
+            )}
           </CardContent>
         </Card>
 
@@ -442,11 +401,20 @@ export function InvoiceForm() {
         </Card>
 
         {/* Botón de envío */}
-        <div className="flex justify-end">
+        <div className="flex justify-end gap-4">
+          <Button 
+            type="button"
+            variant="outline"
+            size="lg"
+            onClick={() => window.history.back()}
+            disabled={isSubmitting}
+          >
+            Cancelar
+          </Button>
           <Button 
             type="submit"
             size="lg"
-            disabled={isSubmitting}
+            disabled={isSubmitting || state.items.length === 0}
           >
             <Send className="mr-2 h-4 w-4" />
             {isSubmitting ? 'Enviando a Siigo...' : 'Enviar Factura a Siigo'}

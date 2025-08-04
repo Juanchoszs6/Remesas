@@ -1,4 +1,4 @@
-import { Input } from "@/components/ui/input"
+ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { NumberInput } from "@/components/ui/number-input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -15,6 +15,7 @@ type InvoiceItemFormProps = {
   index: number
   isLastItem: boolean
   ivaPercentage: number
+  disabled?: boolean
 }
 
 export function InvoiceItemForm({ 
@@ -23,7 +24,8 @@ export function InvoiceItemForm({
   onRemove, 
   index, 
   isLastItem,
-  ivaPercentage 
+  ivaPercentage,
+  disabled = false
 }: InvoiceItemFormProps) {
   return (
     <div className="border rounded-lg p-4 space-y-4">

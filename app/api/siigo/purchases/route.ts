@@ -4,7 +4,7 @@ import { obtenerTokenSiigo } from "../auth/route";
 // Interfaces para los items de la factura
 interface RequestItem {
   id: string;
-  type: 'product' | 'activo' | 'contable' | 'service'; // Added 'service' type
+  type: 'product' | 'activo' | 'contable' ; 
   code: string;
   description: string;
   quantity: number;
@@ -263,7 +263,7 @@ export async function POST(request: NextRequest) {
       const total = subtotal + ivaValue;
       
       const siigoItem: SiigoItem = {
-        type: item.type === 'service' || item.type === 'product' ? 'Product' : item.type === 'activo' ? 'Activo' : 'Contable',
+        type: item.type === 'product' ? 'Product' : item.type === 'activo' ? 'Activo' : 'Contable',
         code: item.code.trim(),
         description: item.description.trim(),
         quantity: item.quantity,
@@ -347,7 +347,7 @@ export async function POST(request: NextRequest) {
     // Construir el cuerpo de la petición a la API de Siigo
     const siigoRequestBody = {
       document: { 
-        id: 24446 // ID fijo para factura de compra según el ejemplo
+        id: 27524 // ID fijo para factura de compra en Siigo
       },
       number: invoiceNumberValue,
       name: `"${prefix || 'FV'}"`, // Formato requerido por Siigo
@@ -367,9 +367,20 @@ export async function POST(request: NextRequest) {
         exchange_rate: 1
       },
       items: siigoItems,
-      payments: payments,
+      payments: [
+        {
+          id: 8467, // ID fijo de pago a crédito
+          name: "Crédito",
+          value: Number(calculateGrandTotal(body.items, ivaPercentage).toFixed(2)),
+          due_date: formatDate(dueDate)
+        }
+      ],
       observations: body.observations || "",
-      total: Number(calculateGrandTotal(body.items, ivaPercentage).toFixed(2))
+      total: Number(calculateGrandTotal(body.items, ivaPercentage).toFixed(2)),
+      metadata: {
+        created: new Date().toISOString(),
+        last_updated: null
+      }
     };
 
     console.log("[PURCHASES] Preparando petición a Siigo API:", {
