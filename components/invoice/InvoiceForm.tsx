@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 import { useReducer, useCallback, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -10,48 +11,61 @@ import { Autocomplete } from "@/components/autocomplete"
 import { InvoiceItemForm } from "@/components/invoice/InvoiceItemForm"
 import { InvoiceItem, Provider } from "@/types/siigo"
 import { toast } from "sonner"
+=======
+import { useReducer, useState } from 'react';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Textarea } from '@/components/ui/textarea';
+import { toast } from 'sonner';
+import { InvoiceItemForm } from "@/components/invoice/InvoiceItemForm";
+import { InvoiceItem, Provider } from "@/types/siigo";
+import { Plus, Send } from 'lucide-react';
+import { Separator } from '@/components/ui/separator';
+import { Autocomplete } from '@/components/autocomplete';
+>>>>>>> cb6efe6 (Id cufe,id documento listo falta demas)
 
-type InvoiceFormState = {
-  items: InvoiceItem[]
-  provider: Provider | null
-  providerCode: string
-  providerIdentification: string
-  invoiceDate: string
-  providerInvoicePrefix: string
-  providerInvoiceNumber: string
-  observations: string
-  ivaPercentage: number
+interface InvoiceState {
+  provider: {
+    identification: string;
+    name: string;
+  } | null;
+  items: InvoiceItem[];
+  invoiceDate: string;
+  documentId: string;
+  providerInvoiceNumber: string;
+  observations: string;
+  ivaPercentage: number;
+  providerCode: string;
+  providerIdentification: string;
+  providerInvoicePrefix: string;
 }
 
 type InvoiceFormAction =
-  | { type: 'ADD_ITEM' }
+  | { type: 'ADD_ITEM'; payload: InvoiceItem }
   | { type: 'REMOVE_ITEM'; payload: string }
   | { type: 'UPDATE_ITEM'; payload: { id: string; field: string; value: any } }
   | { type: 'UPDATE_FIELD'; payload: { field: string; value: any } }
-  | { type: 'SET_PROVIDER'; payload: Provider }
+  | { type: 'SET_PROVIDER'; payload: Provider | null }
+  | { type: 'SET_DOCUMENT_ID'; payload: string }
+  | { type: 'SET_PROVIDER_INVOICE_NUMBER'; payload: string }
 
-const initialState: InvoiceFormState = {
-  items: [{
-    id: Date.now().toString(),
-    type: 'product',
-    code: '',
-    description: '',
-    quantity: 1,
-    price: 0,
-    warehouse: '1',
-    hasIVA: true,
-  }],
+const initialState: InvoiceState = {
+  items: [],
   provider: null,
-  providerCode: '',
-  providerIdentification: '',
+  providerCode: "",
+  providerIdentification: "",
   invoiceDate: new Date().toISOString().split('T')[0],
-  providerInvoicePrefix: 'FAC',
-  providerInvoiceNumber: '',
-  observations: '',
+  documentId: "",
+  providerInvoiceNumber: "",
+  providerInvoicePrefix: "",
+  observations: "",
   ivaPercentage: 19,
-}
+};
 
-function invoiceFormReducer(state: InvoiceFormState, action: InvoiceFormAction): InvoiceFormState {
+function invoiceFormReducer(state: InvoiceState, action: InvoiceFormAction): InvoiceState {
   switch (action.type) {
     case 'ADD_ITEM':
       return {
@@ -94,11 +108,31 @@ function invoiceFormReducer(state: InvoiceFormState, action: InvoiceFormAction):
       }
 
     case 'SET_PROVIDER':
+      if (!action.payload) {
+        return {
+          ...state,
+          provider: null,
+          providerCode: "",
+          providerIdentification: ""
+        };
+      }
       return {
         ...state,
         provider: action.payload,
-        providerCode: action.payload.identification,
-        providerIdentification: action.payload.name,
+        providerCode: action.payload.identificacion,
+        providerIdentification: action.payload.nombre,
+      }
+
+    case 'SET_DOCUMENT_ID':
+      return {
+        ...state,
+        documentId: action.payload,
+      }
+
+    case 'SET_PROVIDER_INVOICE_NUMBER':
+      return {
+        ...state,
+        providerInvoiceNumber: action.payload,
       }
 
     default:
@@ -108,33 +142,56 @@ function invoiceFormReducer(state: InvoiceFormState, action: InvoiceFormAction):
 
 export function InvoiceForm() {
   const [state, dispatch] = useReducer(invoiceFormReducer, initialState)
-  const [isSubmitting, setIsSubmitting] = useState(false)
-  const [submitMessage, setSubmitMessage] = useState('')
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitMessage, setSubmitMessage] = useState('');
 
-  const handleProviderSelect = useCallback((option: any) => {
+  const handleAddItem = () => {
+    const newItem: InvoiceItem = {
+      id: Date.now().toString(),
+      type: 'product',
+      code: '',
+      description: '',
+      quantity: 1,
+      price: 0,
+      warehouse: '1',
+      hasIVA: true,
+    };
+    dispatch({ type: 'ADD_ITEM', payload: newItem });
+  };
+
+  const handleProviderSelect = (option: any) => {
     const provider: Provider = {
       ...option,
       identification: option.codigo,
       name: option.nombre,
     }
     dispatch({ type: 'SET_PROVIDER', payload: provider })
-  }, [])
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
+<<<<<<< HEAD
     e.preventDefault()
     setIsSubmitting(true)
     setSubmitMessage('')
+=======
+    e.preventDefault();
+    setIsSubmitting(true);
+>>>>>>> cb6efe6 (Id cufe,id documento listo falta demas)
     
     try {
-      // Validaciones básicas
       if (!state.provider) {
-        throw new Error('Debe seleccionar un proveedor')
+        throw new Error('Debe seleccionar un proveedor');
+      }
+
+      if (!state.documentId) {
+        throw new Error('Debe ingresar el número de factura');
       }
 
       if (state.items.length === 0) {
-        throw new Error('Debe agregar al menos un ítem')
+        throw new Error('Debe agregar al menos un ítem');
       }
 
+<<<<<<< HEAD
       if (!state.providerInvoiceNumber) {
         throw new Error('El número de factura es requerido')
       }
@@ -179,6 +236,8 @@ export function InvoiceForm() {
       const data = await response.json();
 
       if (!response.ok) {
+
+        
         console.error('Error en la respuesta de la API:', data);
         throw new Error(data.error || 'Error al enviar la factura a Siigo');
       }
@@ -207,10 +266,53 @@ export function InvoiceForm() {
         description: 'Revisa los datos y tu conexión con Siigo.',
         duration: 4000,
       });
+=======
+      const response = await fetch('/api/siigo/purchases', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          provider: {
+            identification: state.provider.identification,
+            name: state.provider.name,
+            branch_office: 0
+          },
+          items: state.items.map(item => ({
+            ...item,
+            quantity: Number(item.quantity),
+            price: Number(item.price),
+          })),
+          documentId: state.documentId,
+          providerInvoiceNumber: state.providerInvoiceNumber,
+          invoiceDate: state.invoiceDate,
+          observations: state.observations,
+          ivaPercentage: state.ivaPercentage,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || 'Error al guardar la factura');
+      }
+
+      const data = await response.json();
+      toast.success('Factura guardada exitosamente');
+      
+      // Limpiar el formulario después de un envío exitoso
+      dispatch({ type: 'SET_PROVIDER', payload: null });
+      dispatch({ type: 'SET_DOCUMENT_ID', payload: '' });
+      dispatch({ type: 'SET_PROVIDER_INVOICE_NUMBER', payload: '' });
+      // ... limpiar otros campos según sea necesario
+      
+    } catch (error: any) {
+      console.error('Error al guardar la factura:', error);
+      toast.error(error.message || 'Error al guardar la factura');
+>>>>>>> cb6efe6 (Id cufe,id documento listo falta demas)
     } finally {
       setIsSubmitting(false);
     }
-  }
+  };
 
   return (
     <div className="max-w-6xl mx-auto p-6 space-y-6">
@@ -229,37 +331,36 @@ export function InvoiceForm() {
               Información General
             </CardTitle>
           </CardHeader>
-          <CardContent className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 gap-4">
             <div className="space-y-2">
-              <Label htmlFor="provider-invoice-prefix">
-                Prefijo Factura Proveedor <span className="text-red-500">*</span>
-              </Label>
-              <Input 
-                id="provider-invoice-prefix" 
-                placeholder="Ej: FAC, FV, etc."
-                value={state.providerInvoicePrefix}
-                onChange={(e) => dispatch({
-                  type: 'UPDATE_FIELD',
-                  payload: { field: 'providerInvoicePrefix', value: e.target.value }
-                })}
-                required 
+              <Label htmlFor="document-id">Número de Factura</Label>
+              <Input
+                id="document-id"
+                placeholder="Número de identificación del documento"
+                value={state.documentId}
+                onChange={(e) =>
+                  dispatch({ type: 'SET_DOCUMENT_ID', payload: e.target.value })
+                }
+                required
               />
+              <p className="text-xs text-muted-foreground">
+                Identificador numérico del documento en Siigo
+              </p>
             </div>
-
             <div className="space-y-2">
-              <Label htmlFor="provider-invoice-number">
-                Número Factura Proveedor <span className="text-red-500">*</span>
-              </Label>
-              <Input 
-                id="provider-invoice-number" 
-                placeholder="Número de factura"
+              <Label htmlFor="provider-invoice-number">Código Único de Factura - CUFE</Label>
+              <Input
+                id="provider-invoice-number"
+                placeholder="Ingrese el CUFE de la factura"
                 value={state.providerInvoiceNumber}
-                onChange={(e) => dispatch({
-                  type: 'UPDATE_FIELD',
-                  payload: { field: 'providerInvoiceNumber', value: e.target.value }
-                })}
-                required 
+                onChange={(e) =>
+                  dispatch({ type: 'SET_PROVIDER_INVOICE_NUMBER', payload: e.target.value })
+                }
+                required
               />
+              <p className="text-xs text-muted-foreground">
+                Código Único de Factura Electrónica
+              </p>
             </div>
 
             <div className="space-y-2">
@@ -289,7 +390,7 @@ export function InvoiceForm() {
                 type="button" 
                 variant="outline" 
                 size="sm"
-                onClick={() => dispatch({ type: 'ADD_ITEM' })}
+                onClick={handleAddItem}
               >
                 <Plus className="h-4 w-4 mr-2" />
                 Agregar Ítem

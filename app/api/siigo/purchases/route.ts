@@ -1,16 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { obtenerTokenSiigo } from "../auth/route";
 
-// 👉 Interfaces para tipado
-interface SiigoItem {
+// Interfaces basadas en el formato requerido por Siigo
+export interface SiigoItem {
   type: "Product" | "Service";
   code: string;
   description: string;
   quantity: number;
   price: number;
+  hasIVA?: boolean;
   discount?: {
-    percentage?: number;
     value?: number;
+    percentage?: number;
   };
   taxes?: Array<{
     id: number;
@@ -19,38 +20,45 @@ interface SiigoItem {
     percentage?: number;
     value?: number;
   }>;
+  total?: number;
 }
 
-interface SiigoPayment {
-  id: number;
-  name?: string;
-  value: number;
-  due_date: string;
+export interface Provider {
+  codigo: string;
+  nombre: string;
+  tipo_documento: string;
+  identificacion: string;
+  nombre_comercial: string;
+  ciudad: string;
+  direccion: string;
+  telefono: string;
+  correo_electronico: string;
+  branch_office?: number;
 }
 
-interface SiigoPurchaseRequest {
-  document: {
-    id: number;
+interface RequestItem {
+  id: string;
+  type: 'product' | 'service';
+  code: string;
+  description: string;
+  quantity: number;
+  price: number;
+  hasIVA: boolean;
+  warehouse?: string;
+  discount?: {
+    value?: number;
+    percentage?: number;
   };
-  date: string;
-  supplier: {
-    identification: string;
-    branch_office: number;
-  };
-  cost_center?: number;
-  provider_invoice: {
-    prefix: string;
-    number: string;
-    date?: string;
-  };
-  discount_type?: "Percentage" | "Value";
-  currency: {
-    code: string;
-    exchange_rate: number;
-  };
+}
+
+interface RequestBody {
+  provider: Provider;
+  items: RequestItem[];
+  invoiceDate: string;
+  providerInvoicePrefix: string;
+  providerInvoiceNumber: string;
   observations?: string;
-  items: SiigoItem[];
-  payments: SiigoPayment[];
+  ivaPercentage: number;
 }
 
 interface RequestItem {
@@ -64,25 +72,45 @@ interface RequestItem {
 }
 
 interface RequestBody {
-  selectedProvider: {
-    identification: string;
-    name: string;
-  };
+  provider: Provider;
   items: RequestItem[];
-  provider_invoice: {
-    prefix: string;
-    number: string;
-    date?: string;
-  };
-  hasIVA?: boolean;
+  documentId: string;
+  providerInvoiceNumber: string;
+  invoiceDate: string;
   ivaPercentage?: number;
   observations?: string;
-  sedeEnvio?: string;
 }
 
-// 👉 Utilidades
+// Utilidad para formatear fechas
 function formatDate(date: Date): string {
-  return date.toISOString().split("T")[0];
+  return date.toISOString().split('T')[0];
+}
+
+// Función para extraer prefijo y número de factura
+function extractInvoiceNumber(invoiceNumber: string): { prefix: string, number: string } {
+  // Si el número ya tiene un guión, separar por guión
+  if (invoiceNumber.includes('-')) {
+    const [prefix, ...numberParts] = invoiceNumber.split('-');
+    return {
+      prefix: prefix.trim() || 'FACT',
+      number: numberParts.join('').trim()
+    };
+  }
+  
+  // Si no tiene guión pero tiene letras seguidas de números
+  const match = invoiceNumber.match(/^([A-Za-z]+)(\d+)$/i);
+  if (match) {
+    return {
+      prefix: match[1] || 'FACT',
+      number: match[2] || invoiceNumber
+    };
+  }
+  
+  // Si no se puede extraer prefijo, usar valor por defecto
+  return {
+    prefix: 'FACT',
+    number: invoiceNumber
+  };
 }
 
 function calculateItemTotal(item: RequestItem, ivaPercentage: number = 19): number {
@@ -101,25 +129,13 @@ export async function POST(request: NextRequest) {
     
     const body: RequestBody = await request.json();
     console.log("[PURCHASES] Datos recibidos:", {
-      proveedor: body.selectedProvider?.identification,
+      proveedor: body.provider?.identification,
       itemsCount: body.items?.length,
-      provider_invoice: body.provider_invoice
+      factura: `${body.providerInvoicePrefix}-${body.providerInvoiceNumber}`
     });
 
-    // ✅ Token y Configuración
-    const siigoToken = await obtenerTokenSiigo();
-    const partnerId = process.env.SIIGO_PARTNER_ID;
-    
-    if (!siigoToken || !partnerId) {
-      console.error("[PURCHASES] Token o Partner ID inválidos");
-      return NextResponse.json({ 
-        error: "Autenticación fallida con Siigo",
-        details: "No se pudo obtener token de autenticación"
-      }, { status: 500 });
-    }
-
-    // 🔒 Validaciones básicas
-    if (!body.selectedProvider?.identification) {
+    // Validaciones básicas
+    if (!body.provider?.identification) {
       return NextResponse.json({ 
         error: "Proveedor requerido",
         details: "Debe seleccionar un proveedor válido"
@@ -133,18 +149,27 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
 
-    if (!body.provider_invoice?.prefix?.trim()) {
-      return NextResponse.json({ 
-        error: "Prefijo de factura requerido",
-        details: "El campo provider_invoice.prefix es obligatorio"
-      }, { status: 400 });
+    // Validar que el CUFE (documentId) y el número de factura estén presentes
+    if (!body.documentId) {
+      return NextResponse.json(
+        { message: "El CUFE es requerido" },
+        { status: 400 }
+      );
     }
 
-    if (!body.provider_invoice?.number?.trim()) {
-      return NextResponse.json({ 
-        error: "Número de factura requerido",
-        details: "El campo provider_invoice.number es obligatorio"
-      }, { status: 400 });
+    if (!body.providerInvoiceNumber) {
+      return NextResponse.json(
+        { message: "El número de factura es requerido" },
+        { status: 400 }
+      );
+    }
+
+    // Validar datos del proveedor
+    if (!body.provider || !body.provider.identificacion || !body.provider.nombre) {
+      return NextResponse.json(
+        { message: "Los datos del proveedor son requeridos" },
+        { status: 400 }
+      );
     }
 
     // Validar items
@@ -180,98 +205,153 @@ export async function POST(request: NextRequest) {
 
     console.log("[PURCHASES] Validaciones completadas exitosamente");
 
+    // ✅ Token y Configuración
+    const siigoToken = await obtenerTokenSiigo();
+    const partnerId = process.env.SIIGO_PARTNER_ID;
+    
+    if (!siigoToken || !partnerId) {
+      console.error("[PURCHASES] Token o Partner ID inválidos");
+      return NextResponse.json({ 
+        error: "Autenticación fallida con Siigo",
+        details: "No se pudo obtener token de autenticación"
+      }, { status: 500 });
+    }
+
+    console.log("[PURCHASES] Validaciones completadas exitosamente");
+
     // 📅 Fechas
     const today = new Date();
     const dueDate = new Date(today);
     dueDate.setDate(dueDate.getDate() + 30); // Vencimiento a 30 días
 
-    // 🎯 IDs y configuraciones fijas (ajusta según tu configuración en Siigo)
-    // ⚠️ IMPORTANTE: Estos IDs deben existir en tu instancia de Siigo
-    const DOCUMENT_ID = 24446; // ID del tipo de documento compra en Siigo
+    // 🎯 IDs y configuraciones (obtenidos del formulario o del sistema)
+    const cufe = body.documentId; // Este es el CUFE
+    const numeroFactura = body.providerInvoiceNumber; // Número de factura del proveedor
     const COST_CENTER_ID = 235; // ID del centro de costos
     const PAYMENT_METHOD_ID = 5636; // ID del método de pago (ejemplo: "Crédito")
     const IVA_TAX_ID = 13156; // ID del impuesto IVA 19% en Siigo
-
-    // 🧮 Preparar items para Siigo
     const ivaPercentage = body.ivaPercentage || 19;
+
+    // Preparar items para Siigo
     const siigoItems: SiigoItem[] = body.items.map((item) => {
       const subtotal = item.quantity * item.price;
+      const ivaValue = item.hasIVA ? (subtotal * ivaPercentage) / 100 : 0;
+      const total = subtotal + ivaValue;
+      
       const siigoItem: SiigoItem = {
-        type: "Product", // Siigo espera "Product" o "Service"
+        type: item.type === 'service' ? 'Service' : 'Product',
         code: item.code.trim(),
         description: item.description.trim(),
         quantity: item.quantity,
-        price: item.price
+        price: item.price,
+        total: Number(total.toFixed(2))
       };
 
       // Agregar impuestos si el item tiene IVA
-      if (item.hasIVA && body.hasIVA) {
-        const ivaValue = (subtotal * ivaPercentage) / 100;
+      if (item.hasIVA) {
         siigoItem.taxes = [
           {
             id: IVA_TAX_ID,
-            name: `IVA ${ivaPercentage}%`,
+            name: `IVA ${body.ivaPercentage}%`,
             type: "IVA",
-            percentage: ivaPercentage,
+            percentage: body.ivaPercentage,
             value: Number(ivaValue.toFixed(2))
           }
         ];
+      }
+      
+      // Agregar descuento si existe
+      if (item.discount?.value) {
+        siigoItem.discount = {
+          value: item.discount.value,
+          percentage: (item.discount.value / subtotal) * 100
+        };
       }
 
       return siigoItem;
     });
 
-    // 🧮 Calcular total
-    const grandTotal = calculateGrandTotal(body.items, ivaPercentage);
+    // Calcular total general
+    const grandTotal = calculateGrandTotal(body.items, body.ivaPercentage);
+    
+    // Calcular subtotal (suma de precios * cantidades)
+    const subtotal = body.items.reduce((sum, item) => {
+      return sum + (item.quantity * item.price);
+    }, 0);
+    
+    // Calcular total de impuestos
+    const totalTaxes = body.items.reduce((sum, item) => {
+      if (item.hasIVA) {
+        const itemSubtotal = item.quantity * item.price;
+        return sum + (itemSubtotal * (body.ivaPercentage || 19) / 100);
+      }
+      return sum;
+    }, 0);
+    
+    // Calcular total de descuentos
+    const totalDiscounts = body.items.reduce((sum, item) => {
+      if (item.discount?.value) {
+        return sum + item.discount.value;
+      }
+      return sum;
+    }, 0);
 
-    // 💰 Preparar pagos
-    const payments: SiigoPayment[] = [
+    // Preparar pagos
+    const payments = [
       {
         id: PAYMENT_METHOD_ID,
+        name: "Crédito",
         value: Number(grandTotal.toFixed(2)),
         due_date: formatDate(dueDate)
       }
     ];
+    
+    console.log('[PURCHASES] Resumen de totales:', {
+      subtotal: Number(subtotal.toFixed(2)),
+      total_impuestos: Number(totalTaxes.toFixed(2)),
+      total_descuentos: Number(totalDiscounts.toFixed(2)),
+      total_factura: Number(grandTotal.toFixed(2))
+    });
 
-    // 🧱 Construcción del body exacto para Siigo API
-    const siigoRequestBody: SiigoPurchaseRequest = {
+    // Extraer prefijo y número de factura
+    const { prefix, number: invoiceNumber } = extractInvoiceNumber(numeroFactura);
+
+    // Construir el cuerpo de la petición a la API de Siigo
+    const siigoRequestBody = {
+      id: cufe, // Usar el CUFE como ID principal del documento
       document: { 
-        id: DOCUMENT_ID 
+        id: parseInt(invoiceNumber, 10) // Usar el número de factura como document.id
       },
+      number: parseInt(invoiceNumber) || 1,
       date: formatDate(today),
-      supplier: {
-        identification: body.selectedProvider.identification.trim(),
-        branch_office: 0 // Sucursal principal
+      supplier: { 
+        identification: body.provider.identificacion.trim(),
+        branch_office: 0
       },
-      ...(COST_CENTER_ID && { cost_center: COST_CENTER_ID }), // Solo incluir si existe
       provider_invoice: {
-        prefix: body.provider_invoice.prefix.trim(),
-        number: body.provider_invoice.number.trim(),
-        ...(body.provider_invoice.date && { date: body.provider_invoice.date })
+        prefix: prefix,
+        number: invoiceNumber
       },
-      discount_type: "Value", // o "Percentage" según necesites
-      currency: {
-        code: "COP", // Peso colombiano
-        exchange_rate: 1 // Para COP es 1
-      },
-      observations: body.observations?.trim() || "Factura de compra generada desde sistema web",
       items: siigoItems,
-      payments: payments
+      payments: payments,
+      observations: body.observations?.trim() || "Factura de compra generada desde sistema web"
     };
 
     console.log("[PURCHASES] Preparando petición a Siigo API:", {
       endpoint: "https://api.siigo.com/v1/purchases",
-      documentId: DOCUMENT_ID,
-      supplierId: body.selectedProvider.identification,
+      id: cufe, // Mostrar el CUFE como ID
+      documentId: numeroFactura,
+      supplierId: body.provider.identificacion,
       itemsCount: siigoItems.length,
-      total: grandTotal,
-      provider_invoice: siigoRequestBody.provider_invoice
+      total: grandTotal
     });
 
     // 🔍 Log completo del payload para debugging
     console.log("[PURCHASES] Payload completo a enviar a Siigo:", JSON.stringify(siigoRequestBody, null, 2));
 
     // 🚀 Envío a Siigo API
+    console.log("[PURCHASES] Enviando solicitud a Siigo API:", JSON.stringify(siigoRequestBody, null, 2));
+    
     const siigoResponse = await fetch("https://api.siigo.com/v1/purchases", {
       method: "POST",
       headers: {

@@ -8,6 +8,10 @@ export interface InvoiceItem {
   price: number;
   warehouse: string;
   hasIVA: boolean;
+  discount?: {
+    value: number;
+    percentage: number;
+  };
 }
 
 // Tipo base para opciones de autocompletado
@@ -23,6 +27,16 @@ export interface Provider extends AutocompleteOption {
   identification: string;
   name: string;
   branch_office?: number;
+  // Campos adicionales para compatibilidad con la API de Siigo
+  codigo: string;
+  nombre: string;
+  tipo_documento: string;
+  identificacion: string;
+  nombre_comercial: string;
+  ciudad: string;
+  direccion: string;
+  telefono: string;
+  correo_electronico: string;
 }
 
 export interface Product extends AutocompleteOption {
