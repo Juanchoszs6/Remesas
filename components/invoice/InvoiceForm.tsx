@@ -6,17 +6,29 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
 import { InvoiceItemForm } from "@/components/invoice/InvoiceItemForm";
-import { InvoiceItem, Provider } from "@/types/siigo";
+import { InvoiceItem } from "@/types/siigo";
 import { Plus, Send } from 'lucide-react';
 import { Separator } from '@/components/ui/separator';
 import { Autocomplete } from '@/components/autocomplete';
 import { useRouter } from 'next/navigation';
 
+interface Provider {
+  identificacion: string;
+  nombre: string;
+  tipo_documento: string;
+  nombre_comercial: string;
+  ciudad: string;
+  direccion: string;
+  telefono: string;
+  correo_electronico: string;
+  codigo?: string;
+  // For backward compatibility
+  identification?: string;
+  name?: string;
+}
+
 interface InvoiceState {
-  provider: {
-    identification: string;
-    name: string;
-  } | null;
+  provider: Provider | null;
   items: InvoiceItem[];
   invoiceDate: string;
   documentId: string;
@@ -145,13 +157,50 @@ export function InvoiceForm() {
   };
 
   const handleProviderSelect = (option: any) => {
-    const provider: Provider = {
-      ...option,
-      identification: option.codigo,
-      name: option.nombre,
+    if (!option) {
+      dispatch({ type: 'SET_PROVIDER', payload: null });
+      return;
     }
-    dispatch({ type: 'SET_PROVIDER', payload: provider })
-  }
+    
+    // Create a complete provider object with all required fields for Siigo
+    const provider: Provider = {
+      identificacion: option.identification || option.identificacion || '',
+      nombre: option.nombre || option.name || '',
+      tipo_documento: '31', // Default to NIT for Colombia
+      nombre_comercial: option.nombre || option.name || '',
+      ciudad: option.ciudad || 'Bogotá', // Default city
+      direccion: option.direccion || 'No especificada',
+      telefono: option.telefono || '0000000',
+      correo_electronico: option.correo_electronico || 'no@especificado.com',
+      // Additional fields for internal use
+      codigo: option.codigo || '',
+      identification: option.identification || option.identificacion || ''
+    };
+    
+    // Update the provider in the form state
+    dispatch({ type: 'SET_PROVIDER', payload: provider });
+    
+    // Update related fields in the form state
+    if (option.identificacion || option.identification) {
+      dispatch({ 
+        type: 'UPDATE_FIELD', 
+        payload: { 
+          field: 'providerIdentification', 
+          value: option.identificacion || option.identification 
+        } 
+      });
+    }
+    
+    if (option.codigo) {
+      dispatch({ 
+        type: 'UPDATE_FIELD', 
+        payload: { 
+          field: 'providerCode', 
+          value: option.codigo 
+        } 
+      });
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -170,17 +219,20 @@ export function InvoiceForm() {
         throw new Error('Debe agregar al menos un ítem');
       }
 
-      // Construir el payload para la API de Siigo
+      // Build the payload for the Siigo API
       const payload = {
         provider: {
-          identificacion: state.provider.identification,
-          nombre: state.provider.name,
-          tipo_documento: 'NIT', // Ajustar según el tipo de documento del proveedor
-          nombre_comercial: state.provider.name,
-          ciudad: '', // Ajustar según sea necesario
-          direccion: '', // Ajustar según sea necesario
-          telefono: '', // Ajustar según sea necesario
-          correo_electronico: '' // Ajustar según sea necesario
+          // Required fields from the selected provider
+          identificacion: state.provider.identificacion || state.provider.identification || '',
+          nombre: state.provider.nombre || state.provider.name || '',
+          tipo_documento: state.provider.tipo_documento || '31', // 31 = NIT for Colombia
+          nombre_comercial: state.provider.nombre_comercial || state.provider.nombre || state.provider.name || '',
+          ciudad: state.provider.ciudad || 'Bogotá',
+          direccion: state.provider.direccion || 'No especificada',
+          telefono: state.provider.telefono || '0000000',
+          correo_electronico: state.provider.correo_electronico || 'no@especificado.com',
+          // Include any additional fields that might be needed
+          ...(state.provider.codigo && { codigo: state.provider.codigo })
         },
         items: state.items.map(item => ({
           id: item.id,
@@ -286,36 +338,47 @@ export function InvoiceForm() {
                 Identificador numérico del documento en Siigo
               </p>
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="provider-invoice-number">Código Único de Factura - CUFE</Label>
-              <Input
-                id="provider-invoice-number"
-                placeholder="Ingrese el CUFE de la factura"
-                value={state.providerInvoiceNumber}
-                onChange={(e) =>
-                  dispatch({ type: 'SET_PROVIDER_INVOICE_NUMBER', payload: e.target.value })
-                }
-                required
-              />
-              <p className="text-xs text-muted-foreground">
-                Código Único de Factura Electrónica
-              </p>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="invoice-date">
-                Fecha de Factura <span className="text-red-500">*</span>
-              </Label>
-              <Input 
-                id="invoice-date" 
-                type="date" 
-                value={state.invoiceDate}
-                onChange={(e) => dispatch({
-                  type: 'UPDATE_FIELD',
-                  payload: { field: 'invoiceDate', value: e.target.value }
-                })}
-                required 
-              />
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="provider">Proveedor</Label>
+                <Autocomplete
+                  label="Proveedor"
+                  placeholder="Buscar proveedor..."
+                  apiEndpoint="/api/proveedores"
+                  value={state.provider?.name || ''}
+                  onSelect={handleProviderSelect}
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="provider-invoice-number">Código Único de Factura - CUFE</Label>
+                <Input
+                  id="provider-invoice-number"
+                  placeholder="Ingrese el CUFE de la factura"
+                  value={state.providerInvoiceNumber}
+                  onChange={(e) =>
+                    dispatch({ type: 'SET_PROVIDER_INVOICE_NUMBER', payload: e.target.value })}
+                  required
+                />
+                <p className="text-xs text-muted-foreground">
+                  Código Único de Factura Electrónica
+                </p>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="invoice-date">
+                  Fecha de Factura <span className="text-red-500">*</span>
+                </Label>
+                <Input 
+                  id="invoice-date" 
+                  type="date" 
+                  value={state.invoiceDate}
+                  onChange={(e) => dispatch({
+                    type: 'UPDATE_FIELD',
+                    payload: { field: 'invoiceDate', value: e.target.value }
+                  })}
+                  required 
+                />
+              </div>
             </div>
           </CardContent>
         </Card>

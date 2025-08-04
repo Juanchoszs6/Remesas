@@ -47,15 +47,15 @@ export function InvoiceItemForm({
           <Label>Tipo de Item</Label>
           <Select 
             value={item.type} 
-            onValueChange={(value) => onUpdate(item.id, 'type', value)}
+            onValueChange={(value: 'product' | 'activo' | 'contable') => onUpdate(item.id, 'type', value)}
           >
             <SelectTrigger>
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="Product">🛍️ Producto</SelectItem>
-              <SelectItem value="FixedAsset">🏢 Activo Fijo</SelectItem>
-              <SelectItem value="Account">💼 Cuenta contable</SelectItem>
+              <SelectItem value="product">🛍️ Producto</SelectItem>
+              <SelectItem value="activo">🏢 Activo Fijo</SelectItem>
+              <SelectItem value="contable">🏦 Cuenta Contable</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -68,13 +68,50 @@ export function InvoiceItemForm({
               apiEndpoint="/api/productos-lista"
               value={item.code}
               onSelect={(option) => {
-                onUpdate(item.id, 'code', option.codigo)
-                onUpdate(item.id, 'description', option.nombre)
+                onUpdate(item.id, 'code', option.codigo);
+                onUpdate(item.id, 'description', option.nombre);
+                if (option.precio_base !== undefined) {
+                  onUpdate(item.id, 'price', option.precio_base);
+                }
+                if (option.tiene_iva !== undefined) {
+                  onUpdate(item.id, 'hasIVA', option.tiene_iva === true);
+                }
               }}
               required
             />
           )}
-          {/* Otros tipos de items... */}
+            {item.type === "activos_fijos" && (
+            <Autocomplete
+              label="Código Activo Fijo"
+              placeholder="Buscar activo fijo..."
+              apiEndpoint="/api/activos-fijos"
+              value={item.code}
+              onSelect={(option) => {
+                onUpdate(item.id, 'code', option.codigo);
+                onUpdate(item.id, 'description', option.nombre);
+                if (option.precio_base) {
+                  onUpdate(item.id, 'price', option.precio_base);
+                }
+                if (option.tiene_iva !== undefined) {
+                  onUpdate(item.id, 'hasIVA', option.tiene_iva);
+                }
+              }}
+              required
+            />
+          )}
+          {item.type === "contable" && (
+            <Autocomplete
+              label="Código Cuenta Contable"
+              placeholder="Buscar cuenta contable..."
+              apiEndpoint="/api/cuentas-contables"
+              value={item.code}
+              onSelect={(option) => {
+                onUpdate(item.id, 'code', option.codigo);
+                onUpdate(item.id, 'description', option.nombre);
+              }}
+              required
+            />
+          )}
         </div>
 
         <div className="space-y-2">

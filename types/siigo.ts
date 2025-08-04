@@ -1,7 +1,7 @@
 // Tipos para el formulario de facturación
 export interface InvoiceItem {
   id: string;
-  type: "product" | "service" | "charge" | "discount" | "activos_fijos";
+  type: "product" | "contable" | "activos_fijos";
   code: string;
   description: string;
   quantity: number;
