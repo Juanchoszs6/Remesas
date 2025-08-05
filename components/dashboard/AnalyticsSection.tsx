@@ -192,10 +192,35 @@ const transformSiigoInvoices = async (invoices: SiigoInvoice[]): Promise<Analyti
     try {
       const amount = parseFloat(invoice.total?.toString() || '0');
       const supplierIdentification = invoice.supplier?.identification || 'UNKNOWN';
-      // Convertir la fecha de la factura a objeto Date
-      console.log(`Fecha original de la factura: ${invoice.date}, tipo: ${typeof invoice.date}`);
-      const invoiceDate = new Date(invoice.date);
-      console.log(`Fecha convertida: ${invoiceDate}, ISO: ${invoiceDate.toISOString()}, año: ${invoiceDate.getFullYear()}, mes: ${invoiceDate.getMonth() + 1}`);
+      
+      // Convertir la fecha de la factura a objeto Date de manera más robusta
+      let invoiceDate: Date;
+      try {
+        // Intentar parsear la fecha de diferentes formatos
+        if (typeof invoice.date === 'string') {
+          // Si la fecha está en formato ISO (YYYY-MM-DD)
+          if (/^\d{4}-\d{2}-\d{2}$/.test(invoice.date)) {
+            invoiceDate = new Date(invoice.date + 'T00:00:00.000Z');
+          } 
+          // Si ya está en formato de fecha completa
+          else {
+            invoiceDate = new Date(invoice.date);
+          }
+          // Validar que la fecha sea válida
+          if (isNaN(invoiceDate.getTime())) {
+            console.warn(`Fecha inválida: ${invoice.date}, usando fecha actual`);
+            invoiceDate = new Date();
+          }
+        } else {
+          console.warn('Tipo de fecha inesperado, usando fecha actual');
+          invoiceDate = new Date();
+        }
+      } catch (error) {
+        console.error('Error al procesar fecha:', error, 'Usando fecha actual');
+        invoiceDate = new Date();
+      }
+      
+      console.log(`Procesando factura - Fecha original: ${invoice.date}, Fecha procesada: ${invoiceDate.toISOString()}, Año: ${invoiceDate.getFullYear()}, Mes: ${invoiceDate.getMonth() + 1}`);
       
       
       // Obtener o crear el nombre del proveedor
@@ -229,22 +254,26 @@ const transformSiigoInvoices = async (invoices: SiigoInvoice[]): Promise<Analyti
       currentSupplier.invoiceCount++;
       currentSupplier.invoices.push(invoice);
       
-      // Procesar todas las facturas para el gráfico, sin filtrar por fecha
-      let invoiceMonthKey = invoiceDate.toLocaleDateString('es-CO', { 
+      // Generar clave de mes para el gráfico (asegurando consistencia en el formato)
+      const invoiceMonthKey = invoiceDate.toLocaleDateString('es-CO', { 
         year: 'numeric', 
-        month: 'short'
-      });
+        month: 'short',
+        timeZone: 'UTC' // Usar UTC para consistencia
+      }).toLowerCase();
       
-      console.log(`Procesando factura para el mes: ${invoiceMonthKey}, fecha original: ${invoice.date}, fecha parseada: ${invoiceDate.toISOString()}`);
+      console.log(`Procesando factura para el mes: ${invoiceMonthKey}, fecha original: ${invoice.date}, fecha procesada: ${invoiceDate.toISOString()}`);
       
-      // Si el mes existe en nuestro mapa de estadísticas, actualizarlo
-      if (monthlyStats.has(invoiceMonthKey)) {
-        const data = monthlyStats.get(invoiceMonthKey)!;
+      // Verificar si ya existe una entrada para este mes
+      let monthData = Array.from(monthlyStats.entries())
+        .find(([key]) => key.toLowerCase() === invoiceMonthKey);
+      
+      if (monthData) {
+        // Actualizar datos del mes existente
+        const [_, data] = monthData;
         data.amount += amount;
         data.count++;
       } else {
-        // Si el mes no está en nuestros últimos 6 meses, crear una nueva entrada
-        // para asegurarnos de que todas las facturas se incluyan
+        // Si el mes no está en nuestro mapa, crear una nueva entrada
         console.log(`Agregando nuevo mes al mapa de estadísticas: ${invoiceMonthKey}`);
         monthlyStats.set(invoiceMonthKey, {
           amount: amount,

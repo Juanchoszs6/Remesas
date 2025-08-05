@@ -1,14 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { obtenerTokenSiigo } from "../auth/route";
 
-// Tipos para la API de Siigo
+// Tipos corregidos según la documentación oficial de Siigo
 interface SiigoDocument {
   id: number;
 }
 
 interface SiigoSupplier {
   identification: string;
-  branch_office?: number;
+  branch_office: number; // Siempre requerido según la doc
 }
 
 interface SiigoProviderInvoice {
@@ -21,35 +21,27 @@ interface SiigoCurrency {
   exchange_rate: number;
 }
 
-// Definición de tipos para los ítems de Siigo
-type SiigoItemType = 'Product' | 'Service' | 'Activo' | 'Contable';
+// Tipos para impuestos según Siigo
+interface SiigoTax {
+  id: number; // Solo se envía el ID del impuesto
+}
 
-interface SiigoItemBase {
+// Tipos para descuentos según Siigo
+interface SiigoDiscount {
+  percentage?: number;
+  value?: number;
+}
+
+// Item según la estructura exacta de Siigo
+interface SiigoItem {
+  type: 'Product' | 'Service' | 'FixedAsset'; // Solo estos tipos están documentados
   code: string;
   description: string;
   quantity: number;
   price: number;
-  total?: number;
-  hasIVA?: boolean;
-  type?: SiigoItemType;
+  discount?: number; // Siigo espera un número, no un objeto
+  taxes?: SiigoTax[];
 }
-
-interface SiigoItemWithDiscount extends SiigoItemBase {
-  discount?: {
-    value?: number;
-    percentage?: number;
-  };
-  taxes?: Array<{
-    id: number;
-    name?: string;
-    type?: string;
-    percentage?: number;
-    value?: number;
-  }>;
-}
-
-// Tipo final para los ítems de Siigo
-type SiigoItem = SiigoItemWithDiscount;
 
 interface SiigoPayment {
   id: number;
@@ -57,95 +49,105 @@ interface SiigoPayment {
   due_date: string;
 }
 
-// Interfaces para los items de la factura
-interface RequestItemTax {
-  id: number;
-  name: string;
-  type: string;
-  percentage: number;
-  value: number;
-}
-
-interface RequestItemDiscount {
-  value?: number;
-  percentage?: number;
-}
-
-interface RequestItem {
-  id: string;
-  type: 'product' | 'activo' | 'contable';
-  code: string;
-  description: string;
-  quantity: number;
-  price: number;
-  hasIVA?: boolean;
-  discount?: RequestItemDiscount;
-  taxes?: RequestItemTax[];
-  total?: number;
-}
-
-interface Provider {
-  identificacion: string;
-  nombre: string;
-  tipo_documento: string;
-  nombre_comercial: string;
-  ciudad: string;
-  direccion: string;
-  telefono: string;
-  correo_electronico: string;
-}
-
+// Request body corregido
 interface RequestBody {
-  provider: Provider;
-  items: RequestItem[];
-  documentId: string; // CUFE
+  provider: {
+    identificacion: string;
+    nombre: string;
+    tipo_documento: string;
+    nombre_comercial: string;
+    ciudad: string;
+    direccion: string;
+    telefono: string;
+    correo_electronico: string;
+    codigo?: string;
+    branch_office?: number;
+  };
+  items: Array<{
+    id: string;
+    type: 'product' | 'activo' | 'contable';
+    code: string;
+    description: string;
+    quantity: number;
+    price: number;
+    hasIVA?: boolean;
+    discount?: {
+      value?: number;
+      percentage?: number;
+    };
+    warehouse?: string;
+  }>;
+  documentId: string;
   providerInvoiceNumber: string;
-  providerInvoicePrefix?: string; // Added missing prefix
+  providerInvoicePrefix?: string;
   invoiceDate: string;
   ivaPercentage?: number;
   observations?: string;
-}
-
-// Utilidad para formatear fechas
-function formatDate(date: Date): string {
-  return date.toISOString().split('T')[0];
-}
-
-// Función para extraer prefijo y número de factura
-function extractInvoiceNumber(invoiceNumber: string): { prefix: string, number: string } {
-  // Si el número ya tiene un guión, separar por guión
-  if (invoiceNumber.includes('-')) {
-    const [prefix, ...numberParts] = invoiceNumber.split('-');
-    return {
-      prefix: prefix.trim() || 'FACT',
-      number: numberParts.join('').trim()
-    };
-  }
-  
-  // Si no tiene guión pero tiene letras seguidas de números
-  const match = invoiceNumber.match(/^([A-Za-z]+)(\d+)$/i);
-  if (match) {
-    return {
-      prefix: match[1] || 'FACT',
-      number: match[2] || invoiceNumber
-    };
-  }
-  
-  // Si no se puede extraer prefijo, usar valor por defecto
-  return {
-    prefix: 'FACT',
-    number: invoiceNumber
+  costCenter?: number;
+  currency?: {
+    code: string;
+    exchange_rate: number;
   };
 }
 
-function calculateItemTotal(item: RequestItem, ivaPercentage: number = 19): number {
-  const subtotal = item.quantity * item.price;
-  const ivaAmount = item.hasIVA ? (subtotal * ivaPercentage / 100) : 0;
-  return subtotal + ivaAmount;
+// Payload completo para Siigo
+interface SiigoPurchaseRequest {
+  document: SiigoDocument;
+  date: string;
+  supplier: SiigoSupplier;
+  cost_center?: number;
+  provider_invoice?: SiigoProviderInvoice;
+  currency?: SiigoCurrency;
+  observations?: string;
+  discount_type?: 'Value' | 'Percentage';
+  supplier_by_item?: boolean;
+  tax_included?: boolean;
+  items: SiigoItem[];
+  payments: SiigoPayment[];
 }
 
-function calculateGrandTotal(items: RequestItem[], ivaPercentage: number = 19): number {
-  return items.reduce((total, item) => total + calculateItemTotal(item, ivaPercentage), 0);
+// Utilidades
+function formatDate(date: string | Date): string {
+  if (typeof date === 'string') {
+    return date; // Ya está en formato YYYY-MM-DD
+  }
+  return date.toISOString().split('T')[0];
+}
+
+function mapItemTypeToSiigo(type: string): 'Product' | 'Service' | 'FixedAsset' {
+  const typeMap: Record<string, 'Product' | 'Service' | 'FixedAsset'> = {
+    'product': 'Product',
+    'producto': 'Product',
+    'service': 'Service',
+    'servicio': 'Service',
+    'activo': 'FixedAsset',
+    'activos_fijos': 'FixedAsset',
+    'fixed_asset': 'FixedAsset',
+    // Nota: 'Account' no existe en la documentación oficial
+    'contable': 'Product', // Mapear a Product por defecto
+    'cuenta_contable': 'Product'
+  };
+  return typeMap[type.toLowerCase()] || 'Product';
+}
+
+function calculateItemSubtotal(item: RequestBody['items'][0]): number {
+  const subtotal = item.quantity * item.price;
+  const discountValue = item.discount?.value || 0;
+  return subtotal - discountValue;
+}
+
+function calculateItemTax(item: RequestBody['items'][0], taxPercentage: number = 19): number {
+  if (!item.hasIVA) return 0;
+  const subtotal = calculateItemSubtotal(item);
+  return subtotal * (taxPercentage / 100);
+}
+
+function calculateGrandTotal(items: RequestBody['items'], taxPercentage: number = 19): number {
+  return items.reduce((total, item) => {
+    const subtotal = calculateItemSubtotal(item);
+    const tax = calculateItemTax(item, taxPercentage);
+    return total + subtotal + tax;
+  }, 0);
 }
 
 export async function POST(request: NextRequest) {
@@ -161,279 +163,204 @@ export async function POST(request: NextRequest) {
         body.providerInvoiceNumber
     });
 
-    // Validaciones básicas mejoradas
+    // Validaciones básicas
     if (!body.provider?.identificacion) {
       console.error('[PURCHASES] Error: Proveedor no proporcionado');
-      return NextResponse.json({ 
+      return NextResponse.json({
         error: "Datos de proveedor incompletos",
-        details: {
-          message: "El proveedor es requerido",
-          fields: ["provider.identificacion"],
-          received: {
-            provider: body.provider,
-            hasIdentification: !!body.provider?.identificacion
-          }
-        }
+        details: "El campo 'provider.identificacion' es requerido"
       }, { status: 400 });
     }
 
     if (!body.items?.length) {
       console.error('[PURCHASES] Error: No se enviaron items');
-      return NextResponse.json({ 
+      return NextResponse.json({
         error: "Datos de ítems incompletos",
-        details: {
-          message: "Debe incluir al menos un ítem en la compra",
-          itemsCount: 0
-        }
+        details: "Debe incluir al menos un ítem en la compra"
       }, { status: 400 });
     }
 
-    // Validar que los ítems tengan la estructura correcta
-    const invalidItems = body.items.filter(item => 
-      !item.code || 
-      !item.description || 
-      !item.quantity || 
-      item.price === undefined ||
-      item.price === null
+    if (!body.providerInvoiceNumber) {
+      console.error('[PURCHASES] Error: Número de factura no proporcionado');
+      return NextResponse.json({
+        error: "Datos de factura incompletos", 
+        details: "El número de factura es requerido"
+      }, { status: 400 });
+    }
+
+    // Validar items
+    const invalidItems = body.items.filter(item =>
+      !item.code || !item.description || !item.quantity || item.price === undefined
     );
 
     if (invalidItems.length > 0) {
       console.error('[PURCHASES] Error: Ítems inválidos', invalidItems);
       return NextResponse.json({
         error: "Datos de ítems inválidos",
-        details: {
-          message: `Hay ${invalidItems.length} ítems con datos incompletos`,
-          invalidItems: invalidItems.map((item, index) => ({
-            index,
-            missingFields: [
-              !item.code && 'código',
-              !item.description && 'descripción',
-              !item.quantity && 'cantidad',
-              (item.price === undefined || item.price === null) && 'precio'
-            ].filter(Boolean)
-          }))
-        }
+        details: `${invalidItems.length} ítems tienen datos incompletos`
       }, { status: 400 });
-    }
-
-    // Validar que el número de factura esté presente
-    if (!body.providerInvoiceNumber) {
-      console.error('[PURCHASES] Error: Número de factura no proporcionado');
-      return NextResponse.json({
-        error: "Datos de factura incompletos",
-        details: {
-          message: "El número de factura es requerido",
-          received: {
-            providerInvoiceNumber: body.providerInvoiceNumber,
-            providerInvoicePrefix: body.providerInvoicePrefix
-          }
-        }
-      });
-    }
-
-    if (!body.provider || !body.provider.identificacion || !body.provider.nombre) {
-      return NextResponse.json(
-        { error: "Los datos del proveedor son requeridos" },
-        { status: 400 }
-      );
     }
 
     console.log("[PURCHASES] Validaciones completadas exitosamente");
 
-    // Verificar que todos los ítems tengan un tipo válido
-    const validTypes = ['product', 'activo', 'contable'];
-    const invalidTypeItems = body.items.filter(item => !validTypes.includes(item.type));
-    
-    if (invalidTypeItems.length > 0) {
-      console.error('Tipos de ítems no válidos:', invalidTypeItems);
-      return NextResponse.json(
-        { error: `Los siguientes ítems tienen tipos no válidos: ${invalidTypeItems.map(i => i.type).join(', ')}. Los tipos válidos son: ${validTypes.join(', ')}` },
-        { status: 400 }
-      );
-    }
+    // Obtener credenciales
+    const siigoToken = await obtenerTokenSiigo();
+    const partnerId = process.env.SIIGO_PARTNER_ID;
 
-    try {
-      // Obtener el token de autenticación de Siigo
-      const siigoToken = await obtenerTokenSiigo();
-      const partnerId = process.env.SIIGO_PARTNER_ID;
-
-      // Validar que tengamos el token y el partner ID
-      if (!siigoToken || !partnerId) {
-        console.error('[PURCHASES] Error: Faltan credenciales de Siigo', {
-          hasToken: !!siigoToken,
-          hasPartnerId: !!partnerId
-        });
-        return NextResponse.json({
-          error: 'Error de autenticación',
-          message: 'No se pudieron obtener las credenciales necesarias de Siigo',
-          timestamp: new Date().toISOString()
-        }, { status: 500 });
-      }
-
-      // Construir el cuerpo de la petición a la API de Siigo
-      const siigoRequestBody = {
-        document: { 
-          id: 1 // ID del tipo de documento (debe obtenerse de la API de Siigo)
-        },
-        date: formatDate(new Date()),
-        supplier: { 
-          identification: body.provider.identificacion,
-          branch_office: 0
-        },
-        cost_center: 1, // ID del centro de costos
-        provider_invoice: {
-          prefix: 'FC',
-          number: body.providerInvoiceNumber
-        },
-        currency: {
-          code: 'COP',
-          exchange_rate: 1
-        },
-        observations: body.observations || 'Factura de compra generada desde el sistema',
-        discount_type: 'Value',
-        supplier_by_item: false,
-        tax_included: false,
-        items: body.items.map(item => ({
-          code: item.code,
-          description: item.description,
-          quantity: item.quantity,
-          price: item.price,
-          discount: item.discount?.value || 0,
-          taxes: item.hasIVA ? [{
-            id: 1, // ID del impuesto (debe obtenerse de la API de Siigo)
-            name: 'IVA',
-            type: 'Percentage',
-            percentage: 19, // Este valor debería venir de la configuración
-            value: item.quantity * item.price * 0.19 // Calcular el valor del IVA
-          }] : [],
-          type: (() => {
-            // Map the request item type to SiigoItemType
-            switch (item.type) {
-              case 'product': return 'Product' as const;
-              case 'activo': return 'Activo' as const;
-              case 'contable': return 'Contable' as const;
-              default: return 'Product' as const;
-            }
-          })()
-        })),
-        payments: [{
-          id: 1, // ID del método de pago (debe obtenerse de la API de Siigo)
-          value: body.items.reduce((sum, item) => sum + (item.quantity * item.price), 0),
-          due_date: formatDate(new Date())
-        }]
-      };
-
-      // Log de la petición (sin información sensible)
-      console.log('Enviando petición a Siigo API:', {
-        url: 'https://api.siigo.com/v1/purchases',
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${siigoToken.substring(0, 10)}...`,
-          'Partner-Id': '***'
-        },
-        body: {
-          ...siigoRequestBody,
-          items: siigoRequestBody.items.map(item => ({
-            ...item,
-            code: item.code,
-            description: item.description.substring(0, 50) + (item.description.length > 50 ? '...' : '')
-          }))
-        }
-      });
-
-      // Realizar la petición a la API de Siigo
-      const siigoResponse = await fetch('https://api.siigo.com/v1/purchases', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${siigoToken}`,
-          'Partner-Id': partnerId
-        },
-        body: JSON.stringify(siigoRequestBody)
-      });
-
-      // Procesar la respuesta
-      const responseText = await siigoResponse.text();
-      let responseData;
-      
-      try {
-        responseData = responseText ? JSON.parse(responseText) : {};
-      } catch (e) {
-        console.error('[PURCHASES] Error al parsear la respuesta JSON:', e);
-        responseData = { 
-          error: 'No se pudo parsear la respuesta',
-          raw: responseText.substring(0, 500)
-        };
-      }
-
-      // Log de la respuesta
-      console.log("\n[PURCHASES] ===== RESPUESTA DE SIGO API =====");
-      console.log(`[PURCHASES] Estado: ${siigoResponse.status} ${siigoResponse.statusText}`);
-      
-      // Mostrar solo los headers relevantes
-      const headers = Object.fromEntries(siigoResponse.headers.entries());
-      console.log("[PURCHASES] Headers:", {
-        'content-type': headers['content-type'],
-        'content-length': headers['content-length'],
-        'date': headers['date']
-      });
-
-      // Manejar la respuesta
-      if (!siigoResponse.ok) {
-        console.error('[PURCHASES] Error en la respuesta:', {
-          status: siigoResponse.status,
-          error: responseData.error || 'Error desconocido',
-          message: responseData.message,
-          details: responseData.details || responseData
-        });
-
-        return NextResponse.json({
-          error: 'Error al procesar la factura en Siigo',
-          message: responseData.message || 'Error desconocido',
-          details: responseData.details || responseData,
-          status: siigoResponse.status
-        }, { 
-          status: siigoResponse.status,
-          statusText: siigoResponse.statusText
-        });
-      }
-
-      // Si llegamos aquí, la petición fue exitosa
-      console.log('[PURCHASES] Factura creada exitosamente:', {
-        id: responseData.id,
-        number: responseData.number,
-        status: responseData.status,
-        total: responseData.total
-      });
-
+    if (!siigoToken || !partnerId) {
+      console.error('[PURCHASES] Error: Faltan credenciales de Siigo');
       return NextResponse.json({
-        success: true,
-        message: `Factura creada exitosamente. Número: ${responseData.number || 'N/A'}`,
-        data: {
-          id: responseData.id,
-          number: responseData.number,
-          total: responseData.total,
-          date: responseData.date,
-          status: responseData.status
-        }
-      });
-    } catch (error) {
-      console.error("[PURCHASES] Error en la petición a Siigo:", error);
-      
-      const errorMessage = error instanceof Error ? error.message : "Error desconocido";
-      const errorStack = error instanceof Error ? error.stack : undefined;
-
-      console.error("[PURCHASES] Stack trace:", errorStack);
-
-      return NextResponse.json({
-        error: "Error al procesar la solicitud",
-        message: errorMessage,
-        timestamp: new Date().toISOString()
+        error: 'Error de autenticación',
+        details: 'No se pudieron obtener las credenciales de Siigo'
       }, { status: 500 });
     }
+
+    // Construir items según formato Siigo
+    const siigoItems: SiigoItem[] = body.items.map(item => {
+      const siigoItem: SiigoItem = {
+        type: mapItemTypeToSiigo(item.type),
+        code: item.code,
+        description: item.description,
+        quantity: item.quantity,
+        price: item.price
+      };
+
+      // Agregar descuento si existe (como número, no objeto)
+      if (item.discount?.value && item.discount.value > 0) {
+        siigoItem.discount = item.discount.value;
+      }
+
+      // Agregar impuestos si el item tiene IVA
+      if (item.hasIVA !== false) {
+        siigoItem.taxes = [{ id: 13156 }]; // ID estándar para IVA 19% en Siigo
+      }
+
+      return siigoItem;
+    });
+
+    // Calcular total para el pago
+    const total = calculateGrandTotal(body.items, body.ivaPercentage || 19);
+
+    // Construir payload según documentación exacta de Siigo
+    const siigoPayload: SiigoPurchaseRequest = {
+      document: {
+        id: parseInt(body.documentId) || 24446 // ID del tipo de documento
+      },
+      date: formatDate(body.invoiceDate),
+      supplier: {
+        identification: body.provider.identificacion,
+        branch_office: body.provider.branch_office || 0 // Siempre incluir branch_office
+      },
+      items: siigoItems,
+      payments: [
+        {
+          id: 5636, // ID del método de pago (debe configurarse según tu cuenta)
+          value: Math.round(total * 100) / 100, // Redondear a 2 decimales
+          due_date: formatDate(body.invoiceDate)
+        }
+      ]
+    };
+
+    // Campos opcionales
+    if (body.costCenter) {
+      siigoPayload.cost_center = body.costCenter;
+    }
+
+    if (body.providerInvoicePrefix && body.providerInvoiceNumber) {
+      siigoPayload.provider_invoice = {
+        prefix: body.providerInvoicePrefix,
+        number: body.providerInvoiceNumber
+      };
+    }
+
+    if (body.currency) {
+      siigoPayload.currency = {
+        code: body.currency.code,
+        exchange_rate: body.currency.exchange_rate
+      };
+    }
+
+    if (body.observations) {
+      siigoPayload.observations = body.observations;
+    }
+
+    // Configuraciones por defecto recomendadas
+    siigoPayload.discount_type = 'Value';
+    siigoPayload.supplier_by_item = false;
+    siigoPayload.tax_included = false;
+
+    // Log del payload (sin información sensible)
+    console.log('[PURCHASES] Payload para Siigo:', {
+      document: siigoPayload.document,
+      date: siigoPayload.date,
+      supplier: { identification: siigoPayload.supplier.identification },
+      itemsCount: siigoPayload.items.length,
+      total: siigoPayload.payments[0].value
+    });
+
+    // Llamada a la API de Siigo
+    const siigoResponse = await fetch('https://api.siigo.com/v1/purchases', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${siigoToken}`,
+        'Partner-Id': partnerId
+      },
+      body: JSON.stringify(siigoPayload)
+    });
+
+    const responseText = await siigoResponse.text();
+    let responseData;
+
+    try {
+      responseData = responseText ? JSON.parse(responseText) : {};
+    } catch (e) {
+      console.error('[PURCHASES] Error al parsear respuesta JSON:', e);
+      return NextResponse.json({
+        error: 'Error en la respuesta de Siigo',
+        details: 'No se pudo parsear la respuesta del servidor',
+        raw: responseText.substring(0, 500)
+      }, { status: 500 });
+    }
+
+    console.log(`[PURCHASES] Respuesta de Siigo: ${siigoResponse.status} ${siigoResponse.statusText}`);
+
+    if (!siigoResponse.ok) {
+      console.error('[PURCHASES] Error en respuesta de Siigo:', {
+        status: siigoResponse.status,
+        error: responseData
+      });
+
+      return NextResponse.json({
+        error: 'Error al procesar la factura en Siigo',
+        message: responseData.message || responseData.error || 'Error desconocido',
+        details: responseData,
+        status: siigoResponse.status
+      }, { status: siigoResponse.status });
+    }
+
+    // Éxito
+    console.log('[PURCHASES] Factura creada exitosamente:', {
+      id: responseData.id,
+      number: responseData.number,
+      total: responseData.total
+    });
+
+    return NextResponse.json({
+      success: true,
+      message: `Factura creada exitosamente`,
+      data: {
+        id: responseData.id,
+        number: responseData.number,
+        total: responseData.total,
+        date: responseData.date,
+        name: responseData.name,
+        balance: responseData.balance
+      }
+    });
+
   } catch (error) {
-    console.error("[PURCHASES] Error en el proceso general:", error);
+    console.error("[PURCHASES] Error general:", error);
     
     const errorMessage = error instanceof Error ? error.message : "Error desconocido";
     

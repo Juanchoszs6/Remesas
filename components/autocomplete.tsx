@@ -23,6 +23,7 @@ interface AutocompleteProps {
   onInputChange?: (value: string) => void // callback for manual input changes
   required?: boolean
   readOnlyInput?: boolean // disables manual typing, only allows dropdown selection
+  disabled?: boolean // disables the entire input field
 }
 
 export function Autocomplete({
@@ -33,7 +34,8 @@ export function Autocomplete({
   onSelect,
   onInputChange,
   required,
-  readOnlyInput = false
+  readOnlyInput = false,
+  disabled = false
 }: AutocompleteProps) {
   const [query, setQuery] = useState<string>(value || '')
   const [options, setOptions] = useState<AutocompleteOption[]>([])
@@ -169,8 +171,10 @@ export function Autocomplete({
           }}
           placeholder={placeholder}
           required={required}
-          readOnly={readOnlyInput}
-          style={readOnlyInput ? { cursor: 'pointer', background: '#f3f4f6' } : undefined}
+          readOnly={readOnlyInput || disabled}
+          disabled={disabled}
+          style={readOnlyInput && !disabled ? { cursor: 'pointer', background: '#f3f4f6' } : undefined}
+          className={disabled ? 'opacity-70 cursor-not-allowed' : ''}
         />
         {isLoading && (
           <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
