@@ -157,6 +157,7 @@ export async function POST(request: NextRequest) {
     const body: RequestBody = await request.json();
     console.log("[PURCHASES] Datos recibidos:", {
       proveedor: body.provider?.identificacion,
+      proveedorNombre: body.provider?.nombre,
       itemsCount: body.items?.length,
       factura: body.providerInvoicePrefix ? 
         `${body.providerInvoicePrefix}-${body.providerInvoiceNumber}` : 
@@ -244,50 +245,32 @@ export async function POST(request: NextRequest) {
     // Construir payload según documentación exacta de Siigo
     const siigoPayload: SiigoPurchaseRequest = {
       document: {
-        id: parseInt(body.documentId) || 24446 // ID del tipo de documento
+        id: parseInt(body.documentId) || 27524
       },
       date: formatDate(body.invoiceDate),
       supplier: {
         identification: body.provider.identificacion,
-        branch_office: body.provider.branch_office || 0 // Siempre incluir branch_office
+        branch_office: body.provider.branch_office || 0
       },
       items: siigoItems,
       payments: [
         {
-          id: 5636, // ID del método de pago (debe configurarse según tu cuenta)
-          value: Math.round(total * 100) / 100, // Redondear a 2 decimales
+          id: 5636,
+          value: Math.round(total * 100) / 100,
           due_date: formatDate(body.invoiceDate)
         }
-      ]
-    };
-
-    // Campos opcionales
-    if (body.costCenter) {
-      siigoPayload.cost_center = body.costCenter;
-    }
-
-    if (body.providerInvoicePrefix && body.providerInvoiceNumber) {
-      siigoPayload.provider_invoice = {
+      ],
+      cost_center: body.costCenter,
+      provider_invoice: body.providerInvoicePrefix && body.providerInvoiceNumber ? {
         prefix: body.providerInvoicePrefix,
         number: body.providerInvoiceNumber
-      };
-    }
-
-    if (body.currency) {
-      siigoPayload.currency = {
-        code: body.currency.code,
-        exchange_rate: body.currency.exchange_rate
-      };
-    }
-
-    if (body.observations) {
-      siigoPayload.observations = body.observations;
-    }
-
-    // Configuraciones por defecto recomendadas
-    siigoPayload.discount_type = 'Value';
-    siigoPayload.supplier_by_item = false;
-    siigoPayload.tax_included = false;
+      } : undefined,
+      currency: body.currency,
+      observations: body.observations,
+      discount_type: 'Value',
+      supplier_by_item: false,
+      tax_included: false
+    };
 
     // Log del payload (sin información sensible)
     console.log('[PURCHASES] Payload para Siigo:', {

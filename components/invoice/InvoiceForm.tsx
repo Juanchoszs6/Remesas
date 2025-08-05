@@ -213,15 +213,8 @@ export function InvoiceForm() {
       return;
     }
 
-    // Extraer información del proveedor
+    // Mapeo robusto para diferentes estructuras
     const codigoProveedor = option.codigo || option.identification || option.identificacion || '';
-    
-    if (!codigoProveedor) {
-      console.error('No se pudo determinar el código del proveedor');
-      toast.error('Error: No se pudo obtener el código del proveedor');
-      return;
-    }
-
     const provider: Provider = {
       identificacion: codigoProveedor,
       codigo: codigoProveedor,
@@ -232,11 +225,11 @@ export function InvoiceForm() {
       direccion: option.direccion || 'No especificada',
       telefono: option.telefono || '0000000',
       correo_electronico: option.correo_electronico || 'no@especificado.com',
+      branch_office: option.branch_office || 0,
       identification: codigoProveedor,
       name: option.name || option.nombre || `Proveedor ${codigoProveedor}`
     };
 
-    console.log('Proveedor seleccionado:', provider);
     dispatch({ type: 'SET_PROVIDER', payload: provider });
   }, []);
 
@@ -275,49 +268,57 @@ export function InvoiceForm() {
   }, [state]);
 
   const buildSiigoPayload = useCallback(() => {
+    // El código del proveedor es el identification
     const codigoProveedor = state.provider?.codigo || state.provider?.identificacion || '';
-    
+    const branchOffice = state.provider?.branch_office ?? 0;
+    const fechaFormateada = state.invoiceDate;
+
     // Mapear los ítems al formato de Siigo
     const items: SiigoPurchaseItemRequest[] = state.items.map(item => ({
       type: mapItemTypeToSiigoType(item.type),
       code: item.code,
-      description: item.description || `Item ${item.code}`,
+      description: item.description || item.code,
       quantity: Number(item.quantity) || 1,
       price: Number(item.price) || 0,
       discount: item.discount?.value || 0,
-      warehouse: item.warehouse ? Number(item.warehouse) : 1,
-      taxes: item.hasIVA !== false ? [{ id: 1 }] : []
+      taxes: item.hasIVA !== false ? [{
+        id: 18384, // ID real del impuesto IVA, ajusta según tu configuración
+        tax_base: (item.price || 0) * (item.quantity || 0),
+        type: "IVA"
+      }] : []
     }));
 
-    // Calcular el total
     const total = calculateTotal(state.items, state.ivaPercentage);
-    
-    // Crear el pago
-    const payment: SiigoPaymentRequest = {
-      id: 1, // Método de pago por defecto
+
+    const payment: SiigoPaymentRequest & { name: string } = {
+      id: 8467, // ID real del método de pago, ajusta según tu configuración
+      name: "OTROS",
       value: total,
-      due_date: state.invoiceDate
+      due_date: fechaFormateada
     };
 
+    // Payload robusto y limpio
     return {
       document: {
-        id: Number(state.documentId) || 1
+        id: 27524,
       },
-      date: state.invoiceDate,
+      date: fechaFormateada,
       supplier: {
-        identification: codigoProveedor,
-        branch_office: state.provider?.branch_office || 0
+        identification: String(codigoProveedor),
+        branch_office: branchOffice
       },
-      number: state.providerInvoiceNumber ? Number(state.providerInvoiceNumber) : undefined,
-      cost_center: state.costCenter || 1,
-      currency: state.currency || { code: "COP", exchange_rate: 1 },
-      observations: state.observations || '',
-      items,
-      payments: [payment],
+      cost_center: state.costCenter,
       provider_invoice: {
-        prefix: state.providerInvoicePrefix || 'FV',
-        number: state.providerInvoiceNumber
-      }
+        prefix: state.providerInvoicePrefix || "FC",
+        number: state.providerInvoiceNumber ? String(Number(state.providerInvoiceNumber)) : null
+      },
+      currency: state.currency,
+      discount_type: "Value",
+      supplier_by_item: false,
+      tax_included: false,
+      observations: state.observations || "",
+      items,
+      payments: [payment]
     };
   }, [state]);
 
@@ -395,36 +396,26 @@ export function InvoiceForm() {
           <CardContent className="space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div className="space-y-2">
-                <Label htmlFor="provider-code">Código de Proveedor *</Label>
-                <Input
-                  id="provider-code"
-                  placeholder="Código del proveedor"
-                  value={state.provider?.codigo || state.provider?.identificacion || ''}
-                  onChange={(e) => {
-                    const codigo = e.target.value;
-                    if (codigo.trim()) {
-                      dispatch({
-                        type: 'SET_PROVIDER',
-                        payload: {
-                          identificacion: codigo,
-                          codigo: codigo,
-                          nombre: `Proveedor ${codigo}`,
-                          tipo_documento: '31',
-                          nombre_comercial: `Proveedor ${codigo}`,
-                          ciudad: 'Bogotá',
-                          direccion: 'No especificada',
-                          telefono: '0000000',
-                          correo_electronico: 'no@especificado.com'
-                        }
-                      });
-                    } else {
-                      dispatch({ type: 'SET_PROVIDER', payload: null });
-                    }
-                  }}
+                <Autocomplete
+                  label="Proveedor"
+                  placeholder="Buscar proveedor..."
+                  apiEndpoint="/api/proveedores"
+                  value={state.provider?.nombre || ""}
+                  onSelect={handleProviderSelect}
+                  disabled={isSubmitting}
                   required
                 />
               </div>
-
+              <div className="space-y-2">
+                <Label htmlFor="provider-code">Código de Proveedor *</Label>
+                <Input
+                  id="provider-code"
+                  value={state.provider?.codigo || state.provider?.identificacion || ''}
+                  readOnly
+                  className="bg-gray-100 cursor-not-allowed"
+                  tabIndex={-1}
+                />
+              </div>
               <div className="space-y-2">
                 <Label htmlFor="provider-invoice-number">Número de Factura *</Label>
                 <Input
@@ -437,7 +428,6 @@ export function InvoiceForm() {
                   required
                 />
               </div>
-
               <div className="space-y-2">
                 <Label htmlFor="invoice-date">Fecha de Factura *</Label>
                 <Input
