@@ -84,7 +84,7 @@ export async function crearCompraSiigo(
     cost_center: datosCompra.centro_costo_id,
     invoice_prefix: datosCompra.prefijo_factura_proveedor,
     invoice_number: datosCompra.numero_factura_proveedor,
-    provider_invoice: datosCompra.numero_factura_proveedor,
+      provider_invoice: datosCompra.numero_factura_proveedor,
     currency: {
       code: datosCompra.codigo_moneda,
     },

@@ -1,47 +1,131 @@
 import { NextResponse } from 'next/server';
 
-// Configuración de debugging
-const DEBUG = process.env.NODE_ENV === 'development';
+// Types for SIIGO API
+interface SiigoTokenResponse {
+  access_token: string;
+  expires_in: number;
+  token_type: string;
+}
 
+interface SiigoError {
+  message: string;
+  code?: string;
+  details?: Record<string, unknown>;
+}
+
+interface PurchaseItem {
+  type: 'Product' | 'Service' | 'Expense' | string;
+  code: string;
+  description: string;
+  quantity: number;
+  price: number;
+  discount?: number;
+  taxes?: Array<{ id: number }>;
+  [key: string]: unknown;
+}
+
+interface Payment {
+  id: number | string;
+  value: number;
+  due_date: string;
+  [key: string]: unknown;
+}
+
+interface PurchasePayload {
+  document: { id: string | number };
+  date: string;
+  supplier: {
+    identification: string;
+    branch_office?: number;
+  };
+  cost_center?: number;
+  provider_invoice: {
+    prefix: string;
+    number: string;
+  };
+  currency?: {
+    code: string;
+    exchange_rate: number;
+  };
+  observations?: string;
+  discount_type?: 'Value' | 'Percentage';
+  supplier_by_item?: boolean;
+  tax_included?: boolean;
+  items: PurchaseItem[];
+  payments: Payment[];
+  [key: string]: unknown;
+}
+
+// Debug configuration
+const DEBUG = process.env.NODE_ENV === 'development';
+const SIIGO_API_URL = process.env.SIIGO_API_URL || 'https://api.siigo.com/v1';
+const DEFAULT_CURRENCY = { code: 'COP', exchange_rate: 1 };
+const DEFAULT_TAX_ID = 13156; // Default tax ID - should be configured per environment
+
+/**
+ * Log debug information in development mode
+ */
 function debugLog(message: string, data?: unknown): void {
   if (DEBUG) {
-    console.log(`[SIIGO-GET-PURCHASES] ${new Date().toISOString()}: ${message}`);
-    if (data) {
-      console.log('[SIIGO-GET-PURCHASES] Data:', JSON.stringify(data, null, 2));
+    const timestamp = new Date().toISOString();
+    console.log(`[SIIGO-PURCHASE-API] ${timestamp}: ${message}`);
+    if (data !== undefined) {
+      console.log(`[SIIGO-PURCHASE-API] Data:`, JSON.stringify(data, null, 2));
     }
   }
 }
 
+/**
+ * Log error information
+ */
 function debugError(message: string, error: unknown): void {
-  console.error(`[SIIGO-GET-PURCHASES] ERROR ${new Date().toISOString()}: ${message}`);
-  console.error('[SIIGO-GET-PURCHASES] Error details:', error);
+  const timestamp = new Date().toISOString();
+  console.error(`[SIIGO-PURCHASE-API] ERROR ${timestamp}: ${message}`);
+  
+  if (error instanceof Error) {
+    console.error(`[SIIGO-PURCHASE-API] ${error.name}: ${error.message}`);
+    if (error.stack) {
+      console.error(`[SIIGO-PURCHASE-API] Stack: ${error.stack}`);
+    }
+  } else if (error !== undefined) {
+    console.error('[SIIGO-PURCHASE-API] Error details:', JSON.stringify(error, null, 2));
+  }
 }
 
-// Función para obtener token de autenticación de Siigo
+/**
+ * Get authentication token from SIIGO API
+ */
 async function getSiigoToken(): Promise<string | null> {
+  const functionName = 'getSiigoToken';
+  debugLog(`${functionName}: Iniciando autenticación con SIIGO`);
+  
   try {
-    debugLog('Obteniendo token de autenticación...');
-    
-    // Verificar que las variables de entorno estén definidas
+    // Validate required environment variables
     const authUrl = process.env.SIIGO_AUTH_URL;
     const username = process.env.SIIGO_USERNAME;
     const accessKey = process.env.SIIGO_ACCESS_KEY;
-    const partnerId = process.env.SIIGO_PARTNER_ID;
+    const partnerId = process.env.SIIGO_PARTNER_ID || 'RemesasYMensajes';
 
-    if (!authUrl || !username || !accessKey || !partnerId) {
-      debugError('Faltan variables de entorno para la autenticación', { 
-        authUrl: !!authUrl, 
-        username: !!username, 
-        accessKey: !!accessKey, 
-        partnerId: !!partnerId 
-      });
+    const missingVars = [];
+    if (!authUrl) missingVars.push('SIIGO_AUTH_URL');
+    if (!username) missingVars.push('SIIGO_USERNAME');
+    if (!accessKey) missingVars.push('SIIGO_ACCESS_KEY');
+
+    if (missingVars.length > 0) {
+      const errorMsg = `Missing required environment variables: ${missingVars.join(', ')}`;
+      const error = new Error(errorMsg);
+      error.name = 'MissingEnvironmentVariables';
+      debugError(`${functionName}: ${errorMsg}`, error);
+      console.error('Missing environment variables:', missingVars);
       return null;
     }
     
-    debugLog('Realizando solicitud directa a Siigo Auth API', { authUrl });
+    // At this point, we've already validated that authUrl is defined
+    const authEndpoint = authUrl as string;
+    debugLog(`${functionName}: Solicitando token a ${authEndpoint}`);
     
-    // Realizar solicitud directa a la API de autenticación de Siigo
-    const response = await fetch(authUrl, {
+    const startTime = Date.now();
+    const response = await fetch(authEndpoint, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -53,17 +137,279 @@ async function getSiigoToken(): Promise<string | null> {
       }),
     });
 
+    const responseTime = Date.now() - startTime;
+    debugLog(`${functionName}: Respuesta recibida en ${responseTime}ms`);
+
     if (!response.ok) {
-      debugError('Error al obtener token directamente de Siigo', await response.text());
+      const errorText = await response.text();
+      debugError(`${functionName}: Error en la autenticación (${response.status})`, {
+        status: response.status,
+        statusText: response.statusText,
+        response: errorText
+      });
       return null;
     }
 
-    const data = await response.json();
-    debugLog('Token obtenido correctamente');
+    const data: SiigoTokenResponse = await response.json();
+    
+    if (!data.access_token) {
+      debugError(`${functionName}: No se recibió token en la respuesta`, data);
+      return null;
+    }
+    
+    debugLog(`${functionName}: Autenticación exitosa`);
     return data.access_token;
   } catch (error) {
-    debugError('Error en getSiigoToken', error);
+    debugError(`${functionName}: Error en la autenticación`, error);
     return null;
+  }
+}
+
+/**
+ * Validate purchase payload against SIIGO requirements
+ */
+function validatePurchasePayload(body: any): { isValid: boolean; error?: SiigoError; missingFields?: string[] } {
+  const requiredFields = [
+    { path: 'document.id', value: body.document?.id || body.documentId },
+    { path: 'date', value: body.date || body.invoiceDate },
+    { 
+      path: 'supplier.identification', 
+      value: body.supplier?.identification || body.providerCode || body.provider?.codigo || body.provider?.identificacion 
+    },
+  ];
+
+  // Check required fields
+  const missing = requiredFields.filter(f => !f.value);
+  if (missing.length > 0) {
+    return {
+      isValid: false,
+      error: {
+        message: 'Missing required fields',
+        details: { missingFields: missing.map(f => f.path) }
+      },
+      missingFields: missing.map(f => f.path as string)
+    };
+  }
+
+  // Validate items
+  if (!Array.isArray(body.items) || body.items.length === 0) {
+    return {
+      isValid: false,
+      error: {
+        message: 'At least one item is required',
+        code: 'ITEMS_REQUIRED'
+      }
+    };
+  }
+
+  // Validate each item
+  const itemErrors: { index: number; field: string }[] = [];
+  body.items.forEach((item: any, index: number) => {
+    if (!item.code) itemErrors.push({ index, field: 'code' });
+    if (!item.description) itemErrors.push({ index, field: 'description' });
+    if (item.quantity === undefined || item.quantity === null) itemErrors.push({ index, field: 'quantity' });
+    if (item.price === undefined || item.price === null) itemErrors.push({ index, field: 'price' });
+  });
+
+  if (itemErrors.length > 0) {
+    return {
+      isValid: false,
+      error: {
+        message: 'Invalid item data',
+        details: { itemErrors }
+      }
+    };
+  }
+
+  return { isValid: true };
+}
+
+/**
+ * Map form data to SIIGO purchase payload
+ */
+function mapToSiigoPayload(body: any): PurchasePayload {
+  // Calculate total amount from items if not provided
+  const totalAmount = body.totalAmount || 
+    (Array.isArray(body.items) ? 
+      body.items.reduce((sum: number, item: any) => sum + (item.price || 0) * (item.quantity || 0), 0) : 0);
+
+  // Default payment if none provided
+  const defaultPayment = [{
+    id: 5636, // Default payment method ID
+    value: totalAmount,
+    due_date: (body.dueDate || body.date || new Date().toISOString().split('T')[0])
+  }];
+
+  return {
+    document: { 
+      id: body.document?.id || body.documentId 
+    },
+    date: (body.invoiceDate || body.date || new Date().toISOString()).split('T')[0],
+    supplier: {
+      identification: body.supplier?.identification || body.providerCode || body.provider?.codigo || body.provider?.identificacion,
+      branch_office: body.supplier?.branch_office || body.branchOffice || 0
+    },
+    cost_center: body.costCenter || 235,
+    provider_invoice: {
+      prefix: body.providerInvoicePrefix || 'FV1',
+      number: body.providerInvoiceNumber || `INV-${Date.now()}`
+    },
+    currency: body.currency || DEFAULT_CURRENCY,
+    observations: body.observations || body.notes || '',
+    discount_type: body.discountType || 'Value',
+    supplier_by_item: false,
+    tax_included: false,
+    items: (body.items || []).map((item: any) => ({
+      type: item.type === 'product' ? 'Product' : (item.type || 'Product'),
+      code: item.code,
+      description: item.description || `Item ${item.code}`,
+      quantity: item.quantity,
+      price: item.price,
+      discount: item.discount || 0,
+      taxes: Array.isArray(item.taxes) && item.taxes.length > 0 
+        ? item.taxes.map((t: any) => (typeof t === 'number' ? { id: t } : t))
+        : [{ id: DEFAULT_TAX_ID }],
+      ...(item.metadata || {}) // Allow additional fields
+    })),
+    payments: Array.isArray(body.payments) && body.payments.length > 0 
+      ? body.payments.map((p: any) => ({
+          id: p.id || 5636,
+          value: p.value || 0,
+          due_date: p.due_date || p.dueDate || (body.dueDate || body.date || new Date().toISOString().split('T')[0]),
+          ...(p.metadata || {}) // Allow additional fields
+        }))
+      : defaultPayment
+  };
+}
+
+/**
+ * POST handler for creating a new purchase in SIIGO
+ */
+export async function POST(request: Request) {
+  const functionName = 'POST /api/siigo/get-purchases';
+  debugLog(`${functionName}: Iniciando proceso de factura`);
+  
+  try {
+    // Parse and validate request body
+    let body: any;
+    try {
+      body = await request.json();
+      debugLog(`${functionName}: Datos recibidos del formulario`, body);
+    } catch (parseError) {
+      debugError(`${functionName}: Error al analizar el cuerpo de la solicitud`, parseError);
+      return NextResponse.json(
+        { error: 'Formato de solicitud inválido' },
+        { status: 400 }
+      );
+    }
+
+    // Get authentication token
+    const token = await getSiigoToken();
+    if (!token) {
+      debugError(`${functionName}: Falló la autenticación con SIIGO`, null);
+      return NextResponse.json(
+        { 
+          error: 'No se pudo autenticar con SIIGO',
+          code: 'AUTHENTICATION_FAILED'
+        },
+        { status: 401 }
+      );
+    }
+
+    // Validate payload
+    const validation = validatePurchasePayload(body);
+    if (!validation.isValid) {
+      debugError(`${functionName}: Validación fallida`, validation.error);
+      return NextResponse.json(
+        { 
+          error: 'Datos de facturación inválidos',
+          ...validation.error,
+          code: validation.error?.code || 'VALIDATION_ERROR'
+        },
+        { 
+          status: 400,
+          headers: { 'Content-Type': 'application/json' }
+        }
+      );
+    }
+
+    // Map to SIIGO format
+    const siigoPayload = mapToSiigoPayload(body);
+    debugLog(`${functionName}: Payload mapeado para SIIGO`, siigoPayload);
+
+    // Send to SIIGO API
+    const startTime = Date.now();
+    const response = await fetch(`${SIIGO_API_URL}/purchases`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`,
+        'Partner-Id': process.env.SIIGO_PARTNER_ID || 'RemesasYMensajes',
+      },
+      body: JSON.stringify(siigoPayload),
+    });
+
+    const responseTime = Date.now() - startTime;
+    const result = await response.json().catch(() => ({}));
+    
+    debugLog(`${functionName}: Respuesta de SIIGO recibida en ${responseTime}ms`, {
+      status: response.status,
+      statusText: response.statusText,
+      response: result
+    });
+
+    // Handle SIIGO API response
+    if (!response.ok) {
+      debugError(`${functionName}: Error en la API de SIIGO`, {
+        status: response.status,
+        statusText: response.statusText,
+        response: result,
+        payload: siigoPayload
+      });
+
+      return NextResponse.json(
+        {
+          error: 'Error al procesar la factura en SIIGO',
+          details: result,
+          code: 'SIIGO_API_ERROR',
+          status: response.status
+        },
+        { 
+          status: response.status >= 500 ? 502 : 400,
+          headers: { 'Content-Type': 'application/json' }
+        }
+      );
+    }
+
+    // Success response
+    debugLog(`${functionName}: Factura procesada exitosamente`, result);
+    return NextResponse.json(
+      { 
+        success: true,
+        data: result,
+        message: 'Factura procesada exitosamente'
+      },
+      { 
+        status: 201,
+        headers: { 'Content-Type': 'application/json' }
+      }
+    );
+
+  } catch (error) {
+    // Handle unexpected errors
+    debugError(`${functionName}: Error inesperado`, error);
+    
+    return NextResponse.json(
+      { 
+        error: 'Error interno del servidor',
+        message: error instanceof Error ? error.message : 'Error desconocido',
+        code: 'INTERNAL_SERVER_ERROR'
+      },
+      { 
+        status: 500,
+        headers: { 'Content-Type': 'application/json' }
+      }
+    );
   }
 }
 

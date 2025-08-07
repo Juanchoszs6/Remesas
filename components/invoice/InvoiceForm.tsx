@@ -192,6 +192,7 @@ export function InvoiceForm() {
   const router = useRouter();
   const [state, dispatch] = useReducer(invoiceFormReducer, initialState);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitResult, setSubmitResult] = useState<{ success: boolean; message: string } | null>(null);
 
   const handleAddItem = useCallback(() => {
     const newItem: InvoiceItem = {
@@ -325,68 +326,64 @@ export function InvoiceForm() {
   const handleSubmit = useCallback(async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSubmitting(true);
-
+    setSubmitResult(null);
     try {
       // Validar formulario
       const validationErrors = validateForm();
       if (validationErrors.length > 0) {
-        toast.error('Errores en el formulario:', {
+        toast.error('Errores en el formulario', {
           description: validationErrors.join(', ')
         });
+        setIsSubmitting(false);
         return;
       }
-
-      // Construir payload
+      // Construir el payload robusto para SIIGO
       const payload = buildSiigoPayload();
-      console.log('Enviando factura a Siigo:', payload);
-
-      // Llamada a la API
-      const response = await fetch('/api/siigo/purchases', {
+      const response = await fetch('/api/siigo/get-purchases', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
-
       const data = await response.json();
-
       if (!response.ok) {
-        console.error('Error en la respuesta de la API:', data);
-        throw new Error(data.error || `Error ${response.status}: ${data.message || 'Error al enviar la factura a Siigo'}`);
+        let siigoMsg = data?.details?.Message || data?.error || data?.message || 'Error desconocido';
+        let missingFields = data?.missingFields ? `\nCampos faltantes: ${data.missingFields.join(', ')}` : '';
+        toast.error('❌ Error al enviar la factura a Siigo', { description: siigoMsg + missingFields, duration: 8000 });
+        setSubmitResult({ success: false, message: siigoMsg + missingFields });
+        throw new Error(siigoMsg + missingFields);
       }
-
-      // Éxito
       toast.success('✅ Factura enviada correctamente a Siigo', {
-        description: `Número de factura: ${data.data?.number || state.providerInvoiceNumber}`,
+        description: `Número de factura: ${data.number || data.data?.number || state.providerInvoiceNumber}`,
         duration: 5000,
       });
-
-      // Limpiar formulario
+      setSubmitResult({ success: true, message: `Factura enviada correctamente. Número: ${data.number || data.data?.number || state.providerInvoiceNumber}` });
       dispatch({ type: 'RESET_FORM' });
-
+      router.refresh();
     } catch (error) {
-      console.error('Error al enviar la factura:', error);
-      
       let errorMessage = 'Error desconocido al enviar la factura';
       if (error instanceof Error) {
         errorMessage = error.message;
       } else if (typeof error === 'string') {
         errorMessage = error;
       }
-
-      toast.error(`❌ Error al enviar la factura`, {
+      toast.error('❌ Error al enviar la factura', {
         description: errorMessage,
         duration: 6000,
       });
+      setSubmitResult({ success: false, message: errorMessage });
     } finally {
       setIsSubmitting(false);
     }
-  }, [state, validateForm, buildSiigoPayload]);
+  }, [state, validateForm, buildSiigoPayload, router]);
 
   // El resto del JSX permanece igual...
   return (
     <div className="max-w-6xl mx-auto p-6 space-y-6">
+      {submitResult && (
+        <div className={`p-4 rounded-md mb-4 text-center ${submitResult.success ? 'bg-green-100 text-green-800 border border-green-300' : 'bg-red-100 text-red-800 border border-red-300'}`}>
+          {submitResult.message}
+        </div>
+      )}
       <form onSubmit={handleSubmit} className="space-y-6">
         {/* Información General */}
         <Card>
