@@ -7,20 +7,13 @@ const pool = new Pool({
 
 export async function GET() {
   try {
-    // Consultar todos los activos de la tabla 'activos' con los campos necesarios
+    // Consultar todos los activos de la tabla 'activos' con solo código y nombre
     const result = await pool.query(
-      'SELECT codigo, nombre, precio_compra as "precio_base", true as "tiene_iva" FROM activos ORDER BY codigo'
+      'SELECT codigo, nombre FROM activos ORDER BY codigo'
     );
     
-    // Formatear los datos para el Autocomplete
-    const activosFormateados = result.rows.map(activo => ({
-      codigo: activo.codigo,
-      nombre: activo.nombre,
-      precio_base: Number(activo.precio_base) || 0,
-      tiene_iva: activo.tiene_iva !== false // Default to true if not specified
-    }));
-    
-    return NextResponse.json(activosFormateados);
+    // Devolver los datos directamente sin campos adicionales
+    return NextResponse.json(result.rows);
   } catch (error) {
     console.error('Error al consultar activos:', error);
     return NextResponse.json(

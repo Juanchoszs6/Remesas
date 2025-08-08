@@ -21,40 +21,40 @@ export async function GET(req: NextRequest) {
   if (!query || query.trim() === '') {
     // Sin parámetro de búsqueda → devolver todas las cuentas contables con paginación
     sqlQuery = `
-      SELECT codigo, nombre 
-      FROM gastos_cuentas_contables 
-      ORDER BY codigo
+      SELECT id_contable as codigo, nombre_contable as nombre 
+      FROM contables 
+      ORDER BY id_contable
       LIMIT $1 OFFSET $2
     `;
     values = [limit, offset];
     
-    countQuery = `SELECT COUNT(*) as total FROM gastos_cuentas_contables`;
+    countQuery = `SELECT COUNT(*) as total FROM contables`;
     countValues = [];
   } else if (/^\d/.test(query)) {
     // Buscar por código con paginación (búsqueda parcial mejorada)
     sqlQuery = `
-      SELECT codigo, nombre 
-      FROM gastos_cuentas_contables 
-      WHERE codigo ILIKE $1
-      ORDER BY codigo
+      SELECT id_contable as codigo, nombre_contable as nombre 
+      FROM contables 
+      WHERE id_contable::text ILIKE $1
+      ORDER BY id_contable
       LIMIT $2 OFFSET $3
     `;
     values = [`%${query}%`, limit, offset];
     
-    countQuery = `SELECT COUNT(*) as total FROM gastos_cuentas_contables WHERE codigo ILIKE $1`;
+    countQuery = `SELECT COUNT(*) as total FROM contables WHERE id_contable::text ILIKE $1`;
     countValues = [`%${query}%`];
   } else {
     // Buscar por nombre con paginación (búsqueda parcial mejorada)
     sqlQuery = `
-      SELECT codigo, nombre 
-      FROM gastos_cuentas_contables 
-      WHERE nombre ILIKE $1
-      ORDER BY nombre
+      SELECT id_contable as codigo, nombre_contable as nombre 
+      FROM contables 
+      WHERE nombre_contable ILIKE $1
+      ORDER BY nombre_contable
       LIMIT $2 OFFSET $3
     `;
     values = [`%${query}%`, limit, offset];
     
-    countQuery = `SELECT COUNT(*) as total FROM gastos_cuentas_contables WHERE nombre ILIKE $1`;
+    countQuery = `SELECT COUNT(*) as total FROM contables WHERE nombre_contable ILIKE $1`;
     countValues = [`%${query}%`];
   }
 
@@ -68,7 +68,7 @@ export async function GET(req: NextRequest) {
     const total = parseInt(countResult.rows[0].total);
     const totalPages = Math.ceil(total / limit);
     
-    console.log(`[GASTOS/CUENTAS API] Query: "${query}" - Página: ${page}/${totalPages} - Resultados: ${result.rows.length}/${total}`);
+    console.log(`[CONTABLES API] Query: "${query}" - Página: ${page}/${totalPages} - Resultados: ${result.rows.length}/${total}`);
     
     return NextResponse.json({
       data: result.rows,

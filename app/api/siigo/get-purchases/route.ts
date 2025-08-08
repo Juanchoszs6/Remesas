@@ -240,19 +240,24 @@ function mapToSiigoPayload(body: any): PurchasePayload {
     due_date: (body.dueDate || body.date || new Date().toISOString().split('T')[0])
   }];
 
-  return {
+  // Crear un objeto de factura con tipos estrictos
+  // Usar el formato exacto de la documentación de Siigo
+  const invoiceNumber = String(body.providerInvoiceNumber || '1234');
+  
+  // Crear el payload con tipos explícitos
+  const payload: PurchasePayload = {
     document: { 
       id: body.document?.id || body.documentId 
     },
     date: (body.invoiceDate || body.date || new Date().toISOString()).split('T')[0],
     supplier: {
-      identification: body.supplier?.identification || body.providerCode || body.provider?.codigo || body.provider?.identificacion,
-      branch_office: body.supplier?.branch_office || body.branchOffice || 0
+      identification: String(body.supplier?.identification || body.providerCode || body.provider?.codigo || body.provider?.identificacion || ''),
+      branch_office: Number(body.supplier?.branch_office || body.branchOffice || 0)
     },
-    cost_center: body.costCenter || 235,
+    cost_center: Number(body.costCenter || 235),
     provider_invoice: {
-      prefix: body.providerInvoicePrefix || 'FV1',
-      number: body.providerInvoiceNumber || `INV-${Date.now()}`
+      prefix: String(body.providerInvoicePrefix || 'FV1'),
+      number: invoiceNumber.replace(/[^0-9]/g, '') // Asegurar que solo tenga números
     },
     currency: body.currency || DEFAULT_CURRENCY,
     observations: body.observations || body.notes || '',
@@ -280,6 +285,8 @@ function mapToSiigoPayload(body: any): PurchasePayload {
         }))
       : defaultPayment
   };
+  
+  return payload;
 }
 
 /**
@@ -335,9 +342,75 @@ export async function POST(request: Request) {
 
     // Map to SIIGO format
     const siigoPayload = mapToSiigoPayload(body);
-    debugLog(`${functionName}: Payload mapeado para SIIGO`, siigoPayload);
+    
+    // 1. Asegurarnos de que el número de factura sea un string
+    if (siigoPayload.provider_invoice) {
+      siigoPayload.provider_invoice.number = String(siigoPayload.provider_invoice.number);
+    }
+    
+    // 2. Crear una copia profunda del payload para verificación
+    const payloadForApi = JSON.parse(JSON.stringify(siigoPayload));
+    
+    // 3. Verificar tipos de datos críticos
+    const typeVerification = {
+      'provider_invoice.number': {
+        value: payloadForApi.provider_invoice?.number,
+        type: typeof payloadForApi.provider_invoice?.number,
+        required: 'string',
+        valid: typeof payloadForApi.provider_invoice?.number === 'string'
+      },
+      'document.id': {
+        value: payloadForApi.document?.id,
+        type: typeof payloadForApi.document?.id,
+        required: 'number or string',
+        valid: ['number', 'string'].includes(typeof payloadForApi.document?.id)
+      },
+      'supplier.identification': {
+        value: payloadForApi.supplier?.identification,
+        type: typeof payloadForApi.supplier?.identification,
+        required: 'string',
+        valid: typeof payloadForApi.supplier?.identification === 'string'
+      }
+    };
+    
+    // 4. Verificar si hay algún tipo incorrecto
+    const typeErrors = Object.entries(typeVerification)
+      .filter(([_, data]: [string, any]) => !data.valid)
+      .map(([field, data]: [string, any]) => ({
+        field,
+        value: data.value,
+        actualType: data.type,
+        expectedType: data.required
+      }));
+    
+    if (typeErrors.length > 0) {
+      const errorMessage = `Error de validación de tipos: ${typeErrors.map(e => 
+        `${e.field} (tipo: ${e.actualType}, esperado: ${e.expectedType})`
+      ).join(', ')}`;
+      
+      return NextResponse.json(
+        { 
+          error: 'Error de validación de tipos',
+          details: typeErrors,
+          code: 'TYPE_VALIDATION_ERROR'
+        },
+        { status: 400 }
+      );
+    }
+    
+    debugLog(`${functionName}: Payload verificado para SIIGO`, payloadForApi);
 
-    // Send to SIIGO API
+    // 5. Serializar manualmente el payload para asegurar el formato correcto
+    const requestBody = JSON.stringify({
+      ...payloadForApi,
+      provider_invoice: {
+        ...payloadForApi.provider_invoice,
+        // Asegurar que el número sea un string, incluso si se perdió en la copia
+        number: String(payloadForApi.provider_invoice.number)
+      }
+    });
+    
+    // 6. Enviar a la API de SIIGO con el payload verificado
     const startTime = Date.now();
     const response = await fetch(`${SIIGO_API_URL}/purchases`, {
       method: 'POST',
@@ -346,7 +419,8 @@ export async function POST(request: Request) {
         'Authorization': `Bearer ${token}`,
         'Partner-Id': process.env.SIIGO_PARTNER_ID || 'RemesasYMensajes',
       },
-      body: JSON.stringify(siigoPayload),
+      // Usar el body ya serializado manualmente
+      body: requestBody
     });
 
     const responseTime = Date.now() - startTime;
