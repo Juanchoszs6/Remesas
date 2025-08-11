@@ -228,17 +228,80 @@ function validatePurchasePayload(body: any): { isValid: boolean; error?: SiigoEr
  * Map form data to SIIGO purchase payload
  */
 function mapToSiigoPayload(body: any): PurchasePayload {
-  // Calculate total amount from items if not provided
-  const totalAmount = body.totalAmount || 
-    (Array.isArray(body.items) ? 
-      body.items.reduce((sum: number, item: any) => sum + (item.price || 0) * (item.quantity || 0), 0) : 0);
+  // Calculate item totals (base amount without tax)
+  const calculateItemBaseTotal = (item: any) => {
+    const quantity = Number(item.quantity) || 1;  
+    const price = Number(item.price) || 0;
+    const discount = Number(item.discount) || 0;
+    
+    // Calculate base value: (quantity * price) - discount
+    const baseValue = Math.round((quantity * price - discount) * 100) / 100;
+    
+    return {
+      baseValue,
+      // Calculate tax for reference (not used in the final total)
+      taxAmount: 0,
+      total: baseValue // Total is just the base value for the API
+    };
+  };
 
-  // Default payment if none provided
-  const defaultPayment = [{
-    id: 5636, // Default payment method ID
-    value: totalAmount,
-    due_date: (body.dueDate || body.date || new Date().toISOString().split('T')[0])
-  }];
+  // Process items and calculate base total (without tax)
+  let itemsWithTotals: any[] = [];
+  let baseTotal = 0;
+
+  if (Array.isArray(body.items)) {
+    itemsWithTotals = body.items.map((item: any) => {
+      const itemTotal = calculateItemBaseTotal(item);
+      baseTotal += itemTotal.baseValue;
+      
+      // Return item with tax information (tax is calculated by Siigo)
+      return {
+        ...item,
+        price: item.price, // Keep original price
+        discount: item.discount || 0,
+        taxes: [{
+          id: 18384, // Default tax ID
+          tax_base: itemTotal.baseValue,
+          type: 'IVA',
+          percentage: 19
+        }]
+      };
+    });
+  }
+
+  // Round base total to 2 decimal places
+  baseTotal = Math.round(baseTotal * 100) / 100;
+  
+  // Debug log the calculated base total
+  debugLog('Calculated base total:', { baseTotal });
+
+  // Process payments - ensure we always have at least one payment with the base total (without tax)
+  let payments = [];
+  
+  if (Array.isArray(body.payments) && body.payments.length > 0) {
+    // Use the first payment method from the request, or default to 0 (let API decide)
+    const paymentMethodId = body.payments[0]?.id || 0;
+    const dueDate = body.payments[0]?.due_date || body.payments[0]?.dueDate || 
+                   (body.dueDate || body.date || new Date().toISOString().split('T')[0]);
+    
+    // Create a single payment with the base total (without tax)
+    payments = [{
+      id: paymentMethodId,
+      value: baseTotal, // Use base total (without tax)
+      due_date: dueDate,
+      ...(body.payments[0]?.metadata || {})
+    }];
+  } else {
+    // Default payment if none provided
+    payments = [{
+      id: 0, // Let API decide the default payment method
+      value: baseTotal, // Use base total (without tax)
+      due_date: (body.dueDate || body.date || new Date().toISOString().split('T')[0])
+    }];
+  }
+  
+  // Debug log the payments for verification
+  debugLog('Processed payments:', { payments, baseTotal });
 
   // Crear un objeto de factura con tipos estrictos
   // Usar el formato exacto de la documentación de Siigo
@@ -254,12 +317,10 @@ function mapToSiigoPayload(body: any): PurchasePayload {
       identification: String(body.supplier?.identification || body.providerCode || body.provider?.codigo || body.provider?.identificacion || ''),
       branch_office: Number(body.supplier?.branch_office || body.branchOffice || 0)
     },
-    cost_center: Number(body.costCenter || 235),
     provider_invoice: {
-      prefix: String(body.providerInvoicePrefix || 'FV1'),
+      prefix: String(body.providerInvoicePrefix || 'FC'),
       number: invoiceNumber.replace(/[^0-9]/g, '') // Asegurar que solo tenga números
     },
-    currency: body.currency || DEFAULT_CURRENCY,
     observations: body.observations || body.notes || '',
     discount_type: body.discountType || 'Value',
     supplier_by_item: false,
@@ -273,22 +334,14 @@ function mapToSiigoPayload(body: any): PurchasePayload {
       discount: item.discount || 0,
       taxes: Array.isArray(item.taxes) && item.taxes.length > 0 
         ? item.taxes.map((t: any) => (typeof t === 'number' ? { id: t } : t))
-        : [{ id: DEFAULT_TAX_ID }],
+        : [{ id: body.defaultTaxId || DEFAULT_TAX_ID }],
       ...(item.metadata || {}) // Allow additional fields
     })),
-    payments: Array.isArray(body.payments) && body.payments.length > 0 
-      ? body.payments.map((p: any) => ({
-          id: p.id || 5636,
-          value: p.value || 0,
-          due_date: p.due_date || p.dueDate || (body.dueDate || body.date || new Date().toISOString().split('T')[0]),
-          ...(p.metadata || {}) // Allow additional fields
-        }))
-      : defaultPayment
+    payments: payments
   };
   
   return payload;
 }
-
 /**
  * POST handler for creating a new purchase in SIIGO
  */
