@@ -5,95 +5,189 @@ import { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
-import { TrendingUp, DollarSign, FileText, AlertCircle, RefreshCw } from 'lucide-react';
+import { 
+  LineChart, 
+  Line, 
+  BarChart,
+  Bar,
+  PieChart, 
+  Pie, 
+  Cell,
+  XAxis, 
+  YAxis, 
+  CartesianGrid, 
+  Tooltip, 
+  Legend, 
+  ResponsiveContainer,
+  LabelList
+} from 'recharts';
+import { 
+  TrendingUp, 
+  DollarSign, 
+  FileText, 
+  Users, 
+  AlertCircle, 
+  RefreshCw, 
+  Calendar, 
+  FileType,
+  Activity,
+  CreditCard,
+  Percent,
+  ArrowUpDown,
+  Filter
+} from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 
-// Types basados en la estructura de Siigo
-interface SiigoInvoice {
+// Tipos de datos para el documento
+interface Documento {
+  id: number;
+  code?: string;
+  name?: string;
+  type?: string;
+  active?: boolean;
+  consecutive?: number;
+  decimals?: boolean;
+  consumption_tax?: boolean;
+  reteiva?: boolean;
+  reteica?: boolean;
+  document_support?: boolean;
+}
+
+// Tipos de datos para el proveedor
+interface Proveedor {
+  id?: string;
+  identification: string;
+  branch_office: number;
+  name?: string;
+}
+
+// Tipos de datos para la moneda
+interface Moneda {
+  code: string;
+  exchange_rate: number;
+  name?: string;
+}
+
+// Tipos de datos para los impuestos
+interface Impuesto {
+  id: number;
+  name: string;
+  type: string;
+  percentage: number;
+  value: number;
+}
+
+// Tipos de datos para los ítems de la factura
+interface ItemFactura {
+  type: string;
   id: string;
-  document: {
-    id: number;
+  code: string;
+  description: string;
+  quantity: number;
+  price: number;
+  discount?: {
+    percentage: number;
+    value: number;
   };
+  taxes: Impuesto[];
+  total: number;
+}
+
+// Tipos de datos para los pagos
+interface Pago {
+  id: number;
+  name: string;
+  value: number;
+  due_date: string;
+  payment_method?: string;
+  status?: string;
+}
+
+// Tipos de datos para los metadatos
+interface Metadata {
+  created: string;
+  last_updated: string | null;
+  created_by?: string;
+  last_updated_by?: string;
+}
+
+// Interfaz principal para las facturas de Siigo
+interface FacturaSiigo {
+  id: string;
+  document: Documento;
   number: number;
   name: string;
   date: string;
-  supplier: {
-    id?: string;
-    identification: string;
-    branch_office: number;
+  due_date?: string;
+  status?: {
+    status: string;
+    created_on: string;
+    updated_on: string | null;
   };
+  supplier: Proveedor;
   cost_center?: number;
   provider_invoice?: {
     prefix: string;
     number: string;
   };
-  discount_type: string;
-  currency: {
-    code: string;
-    exchange_rate: number;
-  };
-  total: number;
-  balance: number;
+  currency: Moneda;
+  items: ItemFactura[];
+  payments: Pago[];
   observations?: string;
-  items: Array<{
-    type: string;
-    id: string;
-    code: string;
-    description: string;
-    quantity: number;
-    price: number;
-    discount?: {
-      percentage: number;
-      value: number;
-    };
-    taxes: Array<{
-      id: number;
-      name: string;
-      type: string;
-      percentage: number;
-      value: number;
-    }>;
-    total: number;
-  }>;
-  payments: Array<{
+  metadata: Metadata;
+  total: number;
+  total_taxes: number;
+  total_discount: number;
+  total_paid: number;
+  balance: number;
+  retention?: {
     id: number;
     name: string;
+    percentage: number;
     value: number;
-    due_date: string;
-  }>;
-  metadata: {
-    created: string;
-    last_updated: string | null;
-  };
+  }[];
+  attachments?: {
+    id: string;
+    name: string;
+    url: string;
+    type: string;
+    size: number;
+  }[];
+  discount_type: string;
 }
 
+// Datos del proveedor para el análisis
 interface SupplierData {
   id: string;
   name: string;
   identification: string;
   totalAmount: number;
   invoiceCount: number;
-  invoices: SiigoInvoice[];
+  invoices: FacturaSiigo[];
   isUnknown?: boolean;
 }
 
+// Datos analíticos para el dashboard
 interface AnalyticsData {
-  totalInvoices: number;
-  totalAmount: number;
-  averageAmount: number;
-  monthlyGrowth: number;
-  suppliers: SupplierData[];
-  monthlyData: Array<{
-    month: string;
-    amount: number;
-    count: number;
+  totalInvoices: number;          // Número total de facturas
+  totalAmount: number;            // Monto total de las facturas
+  averageAmount: number;          // Monto promedio por factura
+  monthlyGrowth: number;          // Crecimiento porcentual mensual
+  suppliers: SupplierData[];      // Lista de proveedores con sus datos
+  monthlyData: Array<{            // Datos mensuales para gráficos
+    month: string;               // Mes en formato 'MMM YYYY' (ej. 'Ene 2023')
+    amount: number;              // Monto total del mes
+    count: number;               // Cantidad de facturas del mes
   }>;
-  categoryBreakdown: Array<{
-    category: string;
-    amount: number;
-    percentage: number;
+  categoryBreakdown: Array<{      // Desglose por categoría de gasto
+    category: string;            // Nombre de la categoría
+    amount: number;              // Monto total de la categoría
+    percentage: number;          // Porcentaje del total que representa la categoría
   }>;
 }
 
@@ -122,7 +216,7 @@ const getSupplierName = async (identification: string): Promise<string> => {
 };
 
 // Función para transformar datos de facturas de Siigo
-const transformSiigoInvoices = async (invoices: SiigoInvoice[]): Promise<AnalyticsData> => {
+const transformSiigoInvoices = async (invoices: FacturaSiigo[]): Promise<AnalyticsData> => {
   if (!invoices || invoices.length === 0) {
     return {
       totalInvoices: 0,
@@ -142,13 +236,18 @@ const transformSiigoInvoices = async (invoices: SiigoInvoice[]): Promise<Analyti
   
   const suppliers = new Map<string, SupplierData>();
   const monthlyStats = new Map<string, { amount: number; count: number; date: Date }>();
-  const now = new Date();
   
-  // Inicializar los últimos 12 meses con valores en 0 para asegurar una visualización más completa
-  // Aseguramos que se muestren todos los meses en el gráfico, incluso si no hay datos
-  for (let i = 0; i < 12; i++) {
-    const date = new Date(now.getFullYear(), now.getMonth() - (11 - i), 1);
-    const monthKey = date.toLocaleDateString('es-CO', { 
+  // Obtener el rango de fechas de las facturas
+  const dates = sortedInvoices.map(invoice => new Date(invoice.date));
+  const minDate = new Date(Math.min(...dates.map(d => d.getTime())));
+  const maxDate = new Date(Math.max(...dates.map(d => d.getTime())));
+  
+  // Inicializar los meses en el rango de fechas de las facturas
+  let currentDate = new Date(minDate.getFullYear(), minDate.getMonth(), 1);
+  const endDate = new Date(maxDate.getFullYear(), maxDate.getMonth() + 1, 0);
+  
+  while (currentDate <= endDate) {
+    const monthKey = currentDate.toLocaleDateString('es-CO', { 
       year: 'numeric', 
       month: 'short'
     });
@@ -157,8 +256,11 @@ const transformSiigoInvoices = async (invoices: SiigoInvoice[]): Promise<Analyti
     monthlyStats.set(monthKey, { 
       amount: 0, 
       count: 0,
-      date: new Date(date) // Guardar la fecha para ordenamiento posterior
+      date: new Date(currentDate) // Guardar la fecha para ordenamiento posterior
     });
+    
+    // Mover al primer día del siguiente mes
+    currentDate.setMonth(currentDate.getMonth() + 1);
   }
   
   // Agregar julio de 2025 si no existe (para manejar el caso donde todas las facturas son de julio 2025)
@@ -401,105 +503,169 @@ const StatsCards = ({ analytics, period }: { analytics: AnalyticsData; period: s
 
 // Componente de Gráfico Mensual Mejorado
 const MonthlyChart = ({ data }: { data: AnalyticsData['monthlyData'] }) => {
-  // Depuración: mostrar los datos recibidos
-  console.log('Datos mensuales recibidos en MonthlyChart:', data);
-  
   // Preparar los datos para el gráfico
   const chartData = data.map(item => {
-    // Obtener el nombre corto del mes
+    // Obtener el nombre corto del mes y año
     const dateParts = item.month.split(' ');
     const shortMonth = dateParts[0].slice(0, 3);
+    const year = dateParts[1];
     
     return {
       month: item.month,
-      shortMonth: shortMonth,
+      shortMonth: `${shortMonth} '${year.slice(2)}`,
       amount: item.amount,
-      count: item.count
+      count: item.count,
+      formattedAmount: formatCurrency(item.amount),
+      formattedCount: item.count.toString()
     };
   });
-  
-  // Depuración: mostrar los datos procesados para el gráfico
-  console.log('Datos procesados para el gráfico:', chartData);
-  
-  // Mostrar información detallada sobre los datos del gráfico
-   console.log('Detalles de los datos del gráfico:', chartData.map(item => `${item.month}: ${item.amount}`));
-   
-   // Verificar si hay meses sin datos
-   if (chartData.some(item => item.amount === 0)) {
-     console.log('Hay meses sin datos de facturación');
-   }
 
-  // Calcular el máximo para el eje Y (redondeado al millón más cercano)
+  // Calcular máximos para escalas
   const maxAmount = Math.max(...chartData.map(item => item.amount), 0);
-  const yMax = Math.ceil(maxAmount / 1000000) * 1000000;
+  const maxCount = Math.max(...chartData.map(item => item.count), 0);
+  
+  // Ajustar la altura del gráfico según la cantidad de datos
+  const chartHeight = Math.max(400, chartData.length * 30);
 
   return (
     <Card className="h-full flex flex-col">
       <CardHeader className="pb-2">
-        <CardTitle className="text-lg">Tendencia Mensual</CardTitle>
-        <CardDescription className="text-sm">Evolución de facturación</CardDescription>
+        <CardTitle className="text-xl font-bold">Análisis Mensual de Compras</CardTitle>
+        <CardDescription className="text-sm">Evolución de facturación y cantidad de facturas por mes</CardDescription>
       </CardHeader>
       <CardContent className="flex-1 p-4 pt-0">
-        <div className="h-[280px] w-full">
+        <div className="w-full" style={{ height: `${chartHeight}px` }}>
           <ResponsiveContainer width="100%" height="100%">
-            <LineChart 
+            <ComposedChart
               data={chartData}
-              margin={{ top: 5, right: 10, left: 0, bottom: 5 }}
+              margin={{ top: 20, right: 20, left: 20, bottom: 20 }}
+              barGap={4}
+              barCategoryGap="10%"
             >
-              <CartesianGrid vertical={false} stroke="#f5f5f5" />
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
+              
+              {/* Eje X */}
               <XAxis 
-                dataKey="shortMonth" 
-                tick={{ fontSize: 11, fill: '#64748b' }}
-                tickLine={false}
+                dataKey="shortMonth"
                 axisLine={false}
-                interval={0}
-                padding={{ left: 15, right: 15 }}
+                tickLine={false}
+                tick={{ fill: '#64748b', fontSize: 12 }}
+                height={24}
               />
+              
+              {/* Eje Y Izquierdo (Monto) */}
               <YAxis 
+                yAxisId="left"
+                orientation="left"
                 tickFormatter={(value) => `$${(value / 1000000).toFixed(0)}M`}
-                tick={{ fontSize: 11, fill: '#64748b' }}
+                tick={{ fill: '#3b82f6', fontSize: 12 }}
                 tickLine={false}
                 axisLine={false}
-                domain={[0, yMax]}
-                width={50}
+                width={60}
               />
+              
+              {/* Eje Y Derecho (Cantidad) */}
+              <YAxis 
+                yAxisId="right"
+                orientation="right"
+                tick={{ fill: '#10b981', fontSize: 12 }}
+                tickLine={false}
+                axisLine={false}
+                width={40}
+              />
+              
+              {/* Tooltip personalizado */}
               <Tooltip 
-                formatter={(value: number, name: string) => [
-                  formatCurrency(Number(value)), 
-                  name === 'amount' ? 'Monto Total' : 'Facturas'
-                ]}
-                labelFormatter={(label) => `Mes: ${label}`}
-                contentStyle={{
-                  backgroundColor: 'white',
-                  border: '1px solid #e2e8f0',
-                  borderRadius: '0.5rem',
-                  padding: '8px 12px',
-                  fontSize: '13px',
-                  boxShadow: '0 2px 4px rgba(0,0,0,0.05)'
+                content={({ active, payload, label }) => {
+                  if (active && payload && payload.length) {
+                    const amountData = payload.find(p => p.dataKey === 'amount');
+                    const countData = payload.find(p => p.dataKey === 'count');
+                    
+                    return (
+                      <div className="bg-white p-3 border border-gray-200 rounded-lg shadow-lg">
+                        <p className="font-semibold text-gray-800">{label}</p>
+                        <div className="mt-1">
+                          <p className="text-sm text-blue-600">
+                            <span className="font-medium">Total: </span>
+                            {amountData?.payload.formattedAmount}
+                          </p>
+                          <p className="text-sm text-green-600">
+                            <span className="font-medium">Facturas: </span>
+                            {countData?.payload.formattedCount}
+                          </p>
+                        </div>
+                      </div>
+                    );
+                  }
+                  return null;
                 }}
-                labelStyle={{ fontWeight: 500, marginBottom: 4 }}
               />
-              <Line 
-                type="monotone" 
-                dataKey="amount" 
+              
+              {/* Leyenda personalizada */}
+              <Legend 
+                verticalAlign="top"
+                height={36}
+                formatter={(value) => (
+                  <span className="text-xs font-medium text-gray-600">
+                    {value === 'amount' ? 'Monto Total' : 'Cantidad de Facturas'}
+                  </span>
+                )}
+              />
+              
+              {/* Gráfico de barras para la cantidad de facturas */}
+              <Bar
+                yAxisId="right"
+                dataKey="count"
+                name="Cantidad de Facturas"
+                fill="#10b981"
+                radius={[4, 4, 0, 0]}
+                barSize={24}
+              >
+                <LabelList 
+                  dataKey="count" 
+                  position="top" 
+                  fill="#065f46"
+                  fontSize={11}
+                  fontWeight={500}
+                  formatter={(value: number) => value > 0 ? value : ''}
+                />
+              </Bar>
+              
+              {/* Línea para el monto total */}
+              <Line
+                yAxisId="left"
+                type="monotone"
+                dataKey="amount"
                 name="Monto Total"
-                stroke="#3b82f6" 
+                stroke="#3b82f6"
                 strokeWidth={2.5}
                 dot={{
                   fill: '#3b82f6',
                   stroke: '#fff',
                   strokeWidth: 2,
-                  r: 4,
+                  r: 5,
                   strokeOpacity: 0.9
                 }}
-                activeDot={{ 
-                  r: 6, 
-                  stroke: '#fff', 
+                activeDot={{
+                  r: 7,
+                  stroke: '#fff',
                   strokeWidth: 2,
                   fill: '#2563eb'
                 }}
-              />
-            </LineChart>
+              >
+                <LabelList 
+                  dataKey="amount" 
+                  position="top" 
+                  fill="#1e40af"
+                  fontSize={11}
+                  fontWeight={500}
+                  offset={10}
+                  formatter={(value: number) => 
+                    value > 0 ? `$${(value / 1000000).toFixed(1)}M` : ''
+                  }
+                />
+              </Line>
+            </ComposedChart>
           </ResponsiveContainer>
         </div>
       </CardContent>
@@ -509,10 +675,14 @@ const MonthlyChart = ({ data }: { data: AnalyticsData['monthlyData'] }) => {
 
 // Componente Principal
 export default function AnalyticsSection() {
-  const [period, setPeriod] = useState('12m'); // Usar 12 meses como período predeterminado
+  const [period, setPeriod] = useState('12m');
   const [isLoading, setIsLoading] = useState(true);
+  const [documentTypes, setDocumentTypes] = useState<any[]>([]);
+  const [selectedDocType, setSelectedDocType] = useState<string>('all');
+  const [dateRange, setDateRange] = useState({ start: '', end: '' });
   const [analytics, setAnalytics] = useState<AnalyticsData | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState('overview');
 
   const getDateRange = (period: string) => {
     // Ignoramos el período y establecemos un rango fijo para asegurar que obtenemos todos los datos
@@ -584,7 +754,7 @@ export default function AnalyticsSection() {
         console.log('Fechas de facturas recibidas:', responseData.results.map((inv: { date: any; }) => inv.date));
       }
       
-      let invoices: SiigoInvoice[] = [];
+      let invoices: FacturaSiigo[] = [];
       
       if (Array.isArray(responseData)) {
         // Si la respuesta es un array directo
@@ -644,204 +814,130 @@ export default function AnalyticsSection() {
     fetchAnalytics();
   }, [period]);
 
-  if (isLoading) {
-    return (
-      <div className="col-span-3 mt-6 space-y-6">
-        <div className="flex items-center space-x-2">
-          <Skeleton className="h-8 w-64" />
-          <div className="animate-spin">
-            <RefreshCw className="h-4 w-4" />
-          </div>
-          <span className="text-sm text-muted-foreground">Conectando con Siigo...</span>
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          {[1, 2, 3].map((i) => (
-            <Skeleton key={i} className="h-32" />
-          ))}
-        </div>
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <Skeleton className="lg:col-span-2 h-80" />
-          <Skeleton className="h-80" />
-        </div>
-      </div>
-    );
-  }
+  // Fetch document types on component mount
+  useEffect(() => {
+    const fetchDocumentTypes = async () => {
+      try {
+        const response = await fetch('/api/siigo/document-types?type=FC');
+        if (!response.ok) {
+          throw new Error('Error al obtener los tipos de documento');
+        }
+        const data = await response.json();
+        setDocumentTypes(data);
+      } catch (error) {
+        console.error('Error fetching document types:', error);
+        toast.error('No se pudieron cargar los tipos de documento');
+      }
+    };
 
-  if (error || !analytics) {
-    return (
-      <Card className="col-span-3 mt-6">
-        <CardContent className="p-6 text-center">
-          <div className="flex flex-col items-center justify-center py-8">
-            <AlertCircle className="h-12 w-12 text-red-500 mb-4" />
-            <h3 className="text-lg font-medium mb-2">Error de Conexión con Siigo</h3>
-            <p className="text-muted-foreground mb-4 max-w-md">
-              {error || 'No se pudieron cargar los datos de facturas desde Siigo'}
-            </p>
-            <div className="text-xs text-gray-500 mb-4">
-              Endpoint: <code>/api/siigo/auth</code> y <code>https://api.siigo.com/v1/purchases</code>
-            </div>
-            <div className="flex space-x-2">
-              <Button onClick={fetchAnalytics} variant="outline">
-                <RefreshCw className="h-4 w-4 mr-2" />
-                Reintentar Conexión
-              </Button>
-              <Button onClick={() => window.location.reload()} variant="default">
-                Recargar Página
-              </Button>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-    );
-  }
+    fetchDocumentTypes();
+  }, []);
+
+  // Set default date range on mount
+  useEffect(() => {
+    const { start, end } = getDateRange(period);
+    setDateRange({ start, end });
+  }, [period]);
+
+  const handleDateChange = (e: React.ChangeEvent<HTMLInputElement>, type: 'start' | 'end') => {
+    setDateRange(prev => ({
+      ...prev,
+      [type]: e.target.value
+    }));
+  };
+
+  const applyDateFilter = () => {
+    fetchAnalytics();
+  };
+
+  const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8', '#82ca9d'];
 
   return (
-    <div className="col-span-3 mt-6 space-y-6">
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+    <div className="space-y-6">
+      <div className="flex flex-col space-y-4 md:flex-row md:items-center md:justify-between md:space-y-0">
         <div>
-          <h2 className="text-2xl font-bold tracking-tight">Análisis de Facturación</h2>
-          <p className="text-muted-foreground">
-            Datos de facturas de compra desde Siigo API
+          <h2 className="text-2xl font-bold tracking-tight">Panel de Análisis de Compras</h2>
+          <p className="text-sm text-muted-foreground">
+            Visualización de datos y métricas de compras
           </p>
         </div>
-        
-        <div className="flex items-center space-x-2">
+        <div className="flex flex-col space-y-2 sm:flex-row sm:items-center sm:space-x-2 sm:space-y-0">
+          <div className="flex items-center space-x-2">
+            <div className="grid gap-2">
+              <div className="flex items-center space-x-2">
+                <Label htmlFor="start-date" className="text-sm font-medium">
+                  Desde:
+                </Label>
+                <Input
+                  id="start-date"
+                  type="date"
+                  value={dateRange.start}
+                  onChange={(e) => handleDateChange(e, 'start')}
+                  className="h-9 text-sm"
+                />
+              </div>
+            </div>
+            <div className="grid gap-2">
+              <div className="flex items-center space-x-2">
+                <Label htmlFor="end-date" className="text-sm font-medium">
+                  Hasta:
+                </Label>
+                <Input
+                  id="end-date"
+                  type="date"
+                  value={dateRange.end}
+                  onChange={(e) => handleDateChange(e, 'end')}
+                  className="h-9 text-sm"
+                />
+              </div>
+            </div>
+            <Button 
+              onClick={applyDateFilter}
+              size="sm"
+              variant="outline"
+            >
+              <Filter className="mr-2 h-4 w-4" />
+              Filtrar
+            </Button>
+          </div>
           <Button
-            onClick={fetchAnalytics}
             variant="outline"
             size="sm"
+            onClick={fetchAnalytics}
             disabled={isLoading}
-            className="flex items-center gap-2"
           >
-            <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
-            Actualizar
-          </Button>
-          <Button
-            variant="default"
-            size="sm"
-            className="px-4"
-            disabled
-          >
-            {period.replace('m', ' meses').replace('y', ' año')}
-          </Button>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 max-w-7xl mx-auto w-full">
-        <div className="lg:col-span-2">
-          <MonthlyChart data={analytics.monthlyData} />
-        </div>
-        
-        <Card className="h-full flex flex-col">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-lg">Proveedores Principales</CardTitle>
-            <CardDescription className="text-sm">Por monto facturado</CardDescription>
-          </CardHeader>
-          <CardContent className="flex-1 p-4 pt-0 overflow-y-auto max-h-[360px]">
-            {analytics.suppliers.length > 0 ? (
-              <div className="space-y-3">
-                {analytics.suppliers.map((supplier, index) => {
-                  const displayName = supplier.name || `Proveedor ${supplier.identification}`;
-                  const shortId = supplier.identification 
-                    ? supplier.identification.slice(0, 8) + (supplier.identification.length > 8 ? '...' : '')
-                    : 'Sin ID';
-                  
-                  const percentage = (supplier.totalAmount / analytics.totalAmount) * 100;
-                  
-                  return (
-                    <div 
-                      key={`${supplier.id}-${index}`} 
-                      className="group p-3 rounded-lg border hover:bg-gray-50 transition-colors"
-                      data-supplier-id={supplier.id}
-                    >
-                      <div className="flex items-start justify-between space-x-3">
-                        <div className="flex-shrink-0 w-8 h-8 rounded-md bg-blue-50 flex items-center justify-center mt-0.5">
-                          <span className="text-blue-600 font-medium text-xs">{index + 1}</span>
-                        </div>
-                        
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center justify-between">
-                            <h4 
-                              className="text-sm font-medium text-gray-900 truncate pr-2" 
-                              title={displayName}
-                            >
-                              {displayName}
-                            </h4>
-                            <span className="text-sm font-semibold text-gray-900 whitespace-nowrap">
-                              {formatCurrency(supplier.totalAmount)}
-                            </span>
-                          </div>
-                          
-                          <div className="flex items-center justify-between mt-1">
-                            <div className="flex items-center space-x-2">
-                              <span className="text-xs text-gray-500 bg-gray-100 px-2 py-0.5 rounded">
-                                {supplier.invoiceCount} factura{supplier.invoiceCount !== 1 ? 's' : ''}
-                              </span>
-                              {supplier.identification !== 'UNKNOWN' && supplier.identification && (
-                                <span className="text-xs text-gray-500 hidden sm:inline-block">
-                                  ID: {shortId}
-                                </span>
-                              )}
-                              {supplier.isUnknown && (
-                                <Badge 
-                                  variant="outline" 
-                                  className="text-2xs text-amber-600 border-amber-200 bg-amber-50 h-4 px-1.5"
-                                >
-                                  Sin identificar
-                                </Badge>
-                              )}
-                            </div>
-                            
-                            <span className="text-xs font-medium text-blue-600 whitespace-nowrap">
-                              {percentage.toFixed(1)}%
-                            </span>
-                          </div>
-                          
-                          <div className="w-full bg-gray-100 rounded-full h-1.5 mt-2 overflow-hidden">
-                            <div 
-                              className="bg-blue-500 h-full rounded-full transition-all duration-300" 
-                              style={{ width: `${Math.min(percentage, 100)}%` }}
-                            />
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
+            {isLoading ? (
+              <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
             ) : (
-              <div className="h-full flex flex-col items-center justify-center text-center p-6">
-                <FileText className="h-10 w-10 text-gray-300 mb-2" />
-                <p className="text-sm font-medium text-gray-500">No hay proveedores</p>
-                <p className="text-xs text-gray-400 mt-1">Intenta con otro período</p>
-              </div>
+              <RefreshCw className="mr-2 h-4 w-4" />
             )}
-          </CardContent>
-        </Card>
+            {isLoading ? 'Cargando...' : 'Actualizar'}
+          </Button>
+          
+          {analytics && (
+            <Card className="border-dashed border-gray-300 mt-4">
+              <CardHeader>
+                <CardTitle className="text-sm flex items-center">
+                  <AlertCircle className="h-4 w-4 mr-2" />
+                  Información de Debug
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <pre className="text-xs bg-gray-50 p-3 rounded overflow-auto max-h-40">
+                  {JSON.stringify({
+                    totalInvoices: analytics.totalInvoices,
+                    totalAmount: analytics.totalAmount,
+                    suppliersCount: analytics.suppliers.length,
+                    monthlyDataPoints: analytics.monthlyData.length,
+                    periodo: period,
+                    ultimaActualizacion: new Date().toLocaleString('es-CO')
+                  }, null, 2)}
+                </pre>
+              </CardContent>
+            </Card>
+          )}
+        </div>
       </div>
-      
-      {analytics && (
-        <Card className="border-dashed border-gray-300">
-          <CardHeader>
-            <CardTitle className="text-sm flex items-center">
-              <AlertCircle className="h-4 w-4 mr-2" />
-              Información de Debug
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <pre className="text-xs bg-gray-50 p-3 rounded overflow-auto max-h-40">
-              {JSON.stringify({
-                totalInvoices: analytics.totalInvoices,
-                totalAmount: analytics.totalAmount,
-                suppliersCount: analytics.suppliers.length,
-                monthlyDataPoints: analytics.monthlyData.length,
-                periodo: period,
-                ultimaActualizacion: new Date().toLocaleString('es-CO')
-              }, null, 2)}
-            </pre>
-          </CardContent>
-        </Card>
-      )}
     </div>
   );
 }
