@@ -12,6 +12,13 @@ import { LogOut, User as UserIcon, Mail, Calendar, Shield, FileText, BarChart2 }
 import AnalyticsSection from './AnalyticsSection';
 import { toast } from 'sonner';
 
+interface User {
+  email: string;
+  created_at: string;
+  role?: string;
+  // Add other user properties as needed
+}
+
 interface DashboardContentProps {
   user: User;
 }
@@ -43,12 +50,27 @@ export default function DashboardContent({ user }: DashboardContentProps) {
     }
   };
 
-  const userInitials = user.email.charAt(0).toUpperCase();
-  const joinDate = new Date(user.created_at).toLocaleDateString('es-ES', {
+  const userInitials = user?.email?.charAt(0).toUpperCase() || 'U';
+  const joinDate = user?.created_at ? new Date(user.created_at).toLocaleDateString('es-ES', {
     year: 'numeric',
     month: 'long',
     day: 'numeric'
-  });
+  }) : 'Fecha no disponible';
+  
+  // Add error boundary for rendering
+  if (!user) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="text-center p-6">
+          <h2 className="text-xl font-semibold text-red-600 mb-2">Error de autenticación</h2>
+          <p className="text-gray-600 mb-4">No se pudo cargar la información del usuario.</p>
+          <Button onClick={() => window.location.reload()} variant="outline">
+            Recargar página
+          </Button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gray-50">

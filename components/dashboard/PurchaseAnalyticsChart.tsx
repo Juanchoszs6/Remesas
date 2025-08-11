@@ -1,350 +1,366 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import React, { useState, useEffect, useCallback } from 'react';
+import { toast } from 'sonner';
 import { Skeleton } from '@/components/ui/skeleton';
 import { 
-  ComposedChart, 
-  Bar, 
-  Line, 
   XAxis, 
   YAxis, 
   CartesianGrid, 
   Tooltip, 
-  Legend, 
   ResponsiveContainer,
-  LabelList
+  LineChart,
+  Line,
+  ReferenceLine
 } from 'recharts';
+import { format, eachMonthOfInterval, startOfYear, endOfYear } from 'date-fns';
+import { es } from 'date-fns/locale';
 
-// Tipos de datos para el gráfico
-interface MonthlyData {
-  month: string;
-  amount: number;
-  count: number;
-  shortMonth: string;
-  formattedAmount: string;
-  formattedCount: string;
-}
-
-interface AnalyticsData {
-  monthlyData: MonthlyData[];
-  totalInvoices: number;
-  totalAmount: number;
+interface ChartData {
+  name: string;
+  facturas: number;
+  monto: number;
+  month: number;
+  year: number;
 }
 
 export default function PurchaseAnalyticsChart() {
-  const [data, setData] = useState<AnalyticsData | null>(null);
+  const [chartData, setChartData] = useState<ChartData[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [totalFacturas, setTotalFacturas] = useState(0);
+  const [totalMonto, setTotalMonto] = useState(0);
 
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        setIsLoading(true);
-        // Obtener datos de la API
-        const response = await fetch('/api/siigo/get-purchases?get_all_pages=true');
-        
-        if (!response.ok) {
-          throw new Error('Error al cargar los datos de compras');
-        }
-        
-        const responseData = await response.json();
-        
-        // Procesar los datos para el gráfico
-        const analyticsData = await processInvoices(responseData);
-        setData(analyticsData);
-        setError(null);
-      } catch (err) {
-        console.error('Error:', err);
-        setError('No se pudieron cargar los datos. Intente de nuevo más tarde.');
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    fetchData();
-  }, []);
-
-  // Función para procesar las facturas y generar datos para el gráfico
-  const processInvoices = async (invoices: any[]): Promise<AnalyticsData> => {
-    // Agrupar facturas por mes
-    const monthlyMap = new Map<string, { amount: number; count: number }>();
-    let totalAmount = 0;
-    
-    // Inicializar los últimos 12 meses con valores en 0
-    const now = new Date();
-    for (let i = 11; i >= 0; i--) {
-      const date = new Date(now);
-      date.setMonth(now.getMonth() - i);
-      date.setDate(1);
-      date.setHours(0, 0, 0, 0);
+  const fetchPurchaseData = useCallback(async () => {
+    try {
+      setIsLoading(true);
+      setError(null);
       
-      const monthKey = date.toLocaleDateString('es-ES', { 
-        year: 'numeric', 
-        month: 'short',
-        timeZone: 'UTC' // Usar UTC para consistencia
+      const response = await fetch('/api/siigo/get-purchases?get_all_pages=true', {
+        headers: {
+          'Cache-Control': 'no-cache',
+          'Pragma': 'no-cache'
+        }
       });
       
-      monthlyMap.set(monthKey, { amount: 0, count: 0 });
-    }
-    
-    // Procesar cada factura
-    for (const invoice of invoices) {
-      try {
-        if (!invoice || !invoice.date) continue;
-        
-        // Crear fecha de manera segura
-        let date: Date;
-        if (typeof invoice.date === 'string') {
-          // Asegurarse de que la fecha tenga el formato correcto
-          const dateStr = invoice.date.split('T')[0]; // Tomar solo la parte de la fecha
-          date = new Date(dateStr + 'T00:00:00.000Z');
-        } else {
-          date = new Date(invoice.date);
-        }
-        
-        // Verificar si la fecha es válida
-        if (isNaN(date.getTime())) {
-          console.warn('Fecha inválida en factura:', invoice.id, invoice.date);
-          continue;
-        }
-        
-        const monthKey = date.toLocaleDateString('es-ES', { 
-          year: 'numeric', 
-          month: 'short',
-          timeZone: 'UTC'
-        });
-        
-        const amount = parseFloat(invoice.total) || 0;
-        const monthData = monthlyMap.get(monthKey) || { amount: 0, count: 0 };
-        
-        monthData.amount += amount;
-        monthData.count += 1;
-        totalAmount += amount;
-        
-        monthlyMap.set(monthKey, monthData);
-      } catch (err) {
-        console.warn('Error procesando factura:', invoice?.id, err);
+      if (!response.ok) {
+        throw new Error(`Error ${response.status}: ${response.statusText}`);
       }
-    }
-    
-    // Convertir a array, ordenar y formatear para el gráfico
-    const monthlyData = Array.from(monthlyMap.entries())
-      .map(([month, data]) => {
-        // Crear fecha de manera segura
-        const [monthName, year] = month.split(' ');
-        const monthIndex = new Date(Date.parse(monthName + ' 1, ' + year)).getMonth();
-        const date = new Date(parseInt(year), monthIndex, 1);
-        
-        // Formato corto para el eje X
-        const shortMonth = date.toLocaleDateString('es-ES', { 
-          month: 'short',
-          timeZone: 'UTC'
-        }) + "'" + date.toLocaleDateString('es-ES', { 
-          year: '2-digit',
-          timeZone: 'UTC'
-        });
       
-      return {
-        month,
-        amount: data.amount,
-        count: data.count,
-        shortMonth,
-        formattedAmount: new Intl.NumberFormat('es-CO', { 
-          style: 'currency', 
-          currency: 'COP',
-          maximumFractionDigits: 0
-        }).format(data.amount),
-        formattedCount: data.count.toString()
-      };
-    }).sort((a, b) => new Date('1 ' + a.month).getTime() - new Date('1 ' + b.month).getTime());
-    
-    // Ordenar los datos por fecha
-    const sortedMonthlyData = monthlyData.sort((a, b) => {
-      const dateA = new Date(a.month + ' 1');
-      const dateB = new Date(b.month + ' 1');
-      return dateA.getTime() - dateB.getTime();
+      const responseData = await response.json();
+      
+      // Verificar la estructura de la respuesta
+      if (!responseData) {
+        throw new Error('La respuesta de la API está vacía');
+      }
+      
+      // Extraer los resultados de la respuesta
+      let invoices = [];
+      if (Array.isArray(responseData)) {
+        invoices = responseData;
+      } else if (responseData.results && Array.isArray(responseData.results)) {
+        invoices = responseData.results;
+      } else if (responseData.data && Array.isArray(responseData.data)) {
+        invoices = responseData.data;
+      } else if (typeof responseData === 'object' && responseData !== null) {
+        // Si es un objeto con datos, intentar extraer las facturas
+        const possibleArrayProps = ['invoices', 'items', 'purchases'];
+        for (const prop of possibleArrayProps) {
+          if (Array.isArray(responseData[prop])) {
+            invoices = responseData[prop];
+            break;
+          }
+        }
+      }
+      
+      if (!invoices.length) {
+        console.warn('No se encontraron facturas en la respuesta:', responseData);
+        setError('No se encontraron datos de facturas');
+        return;
+      }
+      
+      const monthlyData = processMonthlyData(invoices);
+      setChartData(monthlyData);
+      
+      // Calcular totales
+      const { totalInvoices, totalAmount } = calculateTotals(monthlyData);
+      setTotalFacturas(totalInvoices);
+      setTotalMonto(totalAmount);
+      
+    } catch (err) {
+      console.error('Error fetching purchase data:', err);
+      const errorMessage = err instanceof Error ? err.message : 'Error desconocido al cargar los datos';
+      setError(errorMessage);
+      toast.error(`Error: ${errorMessage}`);
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  // Efecto para cargar datos
+  useEffect(() => {
+    fetchPurchaseData();
+  }, [fetchPurchaseData]);
+
+  // Generar datos para los 12 meses del año actual
+  const generateEmptyYearData = (): ChartData[] => {
+    if (typeof window === 'undefined') return [];
+    const currentYear = new Date().getFullYear();
+    const months = eachMonthOfInterval({
+      start: startOfYear(new Date(currentYear, 0, 1)),
+      end: endOfYear(new Date(currentYear, 11, 31))
     });
     
-    return {
-      monthlyData: sortedMonthlyData,
-      totalInvoices: invoices.length,
-      totalAmount
-    };
+    return months.map(month => ({
+      name: format(month, 'MMM yyyy', { locale: es }),
+      facturas: 0,
+      monto: 0,
+      month: month.getMonth(),
+      year: month.getFullYear()
+    }));
   };
 
+  // Procesar datos mensuales
+  const processMonthlyData = (invoices: any[]): ChartData[] => {
+    if (!Array.isArray(invoices)) {
+      console.error('Se esperaba un array de facturas');
+      return generateEmptyYearData();
+    }
+    
+    const yearData = generateEmptyYearData();
+    
+    // Procesar facturas
+    invoices.forEach(invoice => {
+      try {
+        if (!invoice) return;
+        
+        // Obtener la fecha de la factura (usar created si date no está disponible)
+        const dateStr = invoice.date || invoice.created || invoice.creation_date;
+        if (!dateStr) {
+          console.warn('Factura sin fecha válida:', invoice.id);
+          return;
+        }
+        
+        const date = new Date(dateStr);
+        if (isNaN(date.getTime())) {
+          console.warn('Fecha de factura inválida:', dateStr, 'en factura:', invoice.id);
+          return;
+        }
+        
+        const month = date.getMonth();
+        const year = date.getFullYear();
+        
+        // Obtener el monto total (usar total, amount o calcularlo)
+        let amount = 0;
+        if (typeof invoice.total === 'number') {
+          amount = invoice.total;
+        } else if (typeof invoice.amount === 'number') {
+          amount = invoice.amount;
+        } else if (Array.isArray(invoice.payments) && invoice.payments.length > 0) {
+          // Sumar los pagos si no hay un total directo
+          amount = invoice.payments.reduce((sum: number, payment: any) => {
+            return sum + (parseFloat(payment.value) || 0);
+          }, 0);
+        }
+        
+        // Encontrar el mes correspondiente en los datos anuales
+        const monthData = yearData.find(m => m.month === month && m.year === year);
+        if (monthData) {
+          monthData.facturas += 1;
+          monthData.monto += Math.max(0, amount); // Asegurar que no sea negativo
+        }
+      } catch (error) {
+        console.error('Error procesando factura:', invoice.id, error);
+      }
+    });
+    
+    // Formatear montos y asegurar que estén redondeados
+    return yearData.map(month => ({
+      ...month,
+      monto: parseFloat(month.monto.toFixed(2)),
+      name: format(new Date(month.year, month.month, 1), 'MMM yyyy', { locale: es })
+    }));
+  };
+  
+  // Calcular totales
+  const calculateTotals = (data: ChartData[]) => {
+    return data.reduce(
+      (totals, month) => ({
+        totalInvoices: totals.totalInvoices + month.facturas,
+        totalAmount: totals.totalAmount + month.monto
+      }),
+      { totalInvoices: 0, totalAmount: 0 }
+    );
+  };
+  
+  // Formatear moneda
+  const formatCurrency = (value: number): string => {
+    if (isNaN(value)) return '$0';
+    
+    return new Intl.NumberFormat('es-CO', {
+      style: 'currency',
+      currency: 'COP',
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0
+    }).format(value);
+  };
+
+  // Render loading state
   if (isLoading) {
     return (
-      <Card className="w-full h-[500px] flex items-center justify-center">
-        <div className="space-y-4 w-full max-w-md">
-          <Skeleton className="h-8 w-full" />
-          <Skeleton className="h-64 w-full" />
-        </div>
-      </Card>
+      <div className="w-full rounded-lg border bg-white p-4 shadow-sm">
+        <Skeleton className="h-6 w-48 mb-4" />
+        <Skeleton className="h-4 w-64 mb-6" />
+        <Skeleton className="h-64 w-full" />
+      </div>
     );
   }
 
   if (error) {
     return (
-      <Card className="w-full h-[500px] flex items-center justify-center">
-        <div className="text-center p-6">
-          <p className="text-red-500">{error}</p>
-        </div>
-      </Card>
+      <div className="w-full rounded-lg border border-red-200 bg-red-50 p-4 shadow-sm">
+        <h3 className="text-lg font-semibold text-red-800">Error</h3>
+        <p className="text-red-600">{error}</p>
+        <button 
+          onClick={() => window.location.reload()}
+          className="mt-4 rounded bg-blue-600 px-4 py-2 text-white hover:bg-blue-700"
+        >
+          Reintentar
+        </button>
+      </div>
     );
   }
 
-  if (!data || data.monthlyData.length === 0) {
-    return (
-      <Card className="w-full h-[500px] flex items-center justify-center">
-        <div className="text-center p-6">
-          <p>No hay datos disponibles para mostrar</p>
-        </div>
-      </Card>
-    );
-  }
+  // Colores personalizados
+  const colors = {
+    primary: '#3b82f6',
+    secondary: '#10b981',
+    background: '#ffffff',
+    text: '#1e293b',
+    grid: '#e2e8f0',
+    tooltipBg: 'rgba(255, 255, 255, 0.98)'
+  };
+
+
 
   return (
-    <Card className="w-full">
-      <CardHeader>
-        <CardTitle className="text-xl font-bold">Análisis Mensual de Compras</CardTitle>
-      </CardHeader>
-      <CardContent className="p-6 pt-0">
-        <div className="h-[500px] w-full">
+    <div className="w-full rounded-lg border bg-white p-4 shadow-sm">
+      <div className="mb-4">
+        <h3 className="text-lg font-semibold text-gray-800">Evolución de Compras</h3>
+        <p className="text-sm text-gray-500">Total facturado por mes</p>
+      </div>
+      <div className="p-4 pt-0">
+        <div className="mb-4 flex items-end justify-between">
+          <div>
+            <p className="text-sm font-medium text-gray-500">Total General</p>
+            <p className="text-2xl font-bold text-blue-600">
+              {typeof totalMonto === 'number' ? formatCurrency(totalMonto) : '$0'}
+            </p>
+          </div>
+          <div className="text-right">
+            <p className="text-sm font-medium text-gray-500">Facturas</p>
+            <p className="text-lg font-semibold text-gray-700">
+              {typeof totalFacturas === 'number' ? totalFacturas.toLocaleString('es-ES') : '0'}
+            </p>
+          </div>
+        </div>
+        
+        <div className="h-[300px] w-full">
           <ResponsiveContainer width="100%" height="100%">
-            <ComposedChart
-              data={data.monthlyData}
-              margin={{ top: 20, right: 20, left: 20, bottom: 20 }}
-              barGap={4}
-              barCategoryGap="10%"
+            <LineChart
+              data={chartData}
+              margin={{ top: 10, right: 10, left: 0, bottom: 20 }}
             >
-              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
+              <defs>
+                <linearGradient id="lineGradient" x1="0" y1="0" x2="1" y2="0">
+                  <stop offset="0%" stopColor={colors.primary} stopOpacity={0.8} />
+                  <stop offset="100%" stopColor={colors.secondary} stopOpacity={0.8} />
+                </linearGradient>
+              </defs>
               
-              {/* Eje X */}
+              <CartesianGrid 
+                vertical={false} 
+                stroke={colors.grid}
+                strokeDasharray="3 3"
+              />
+              
               <XAxis 
-                dataKey="shortMonth"
+                dataKey="name" 
                 axisLine={false}
                 tickLine={false}
-                tick={{ fill: '#64748b', fontSize: 12 }}
-                height={24}
+                tick={{ fill: '#64748b', fontSize: 11, fontWeight: 400 }}
+                height={20}
+                tickMargin={8}
+                interval={0}
               />
               
-              {/* Eje Y Izquierdo (Monto) */}
               <YAxis 
-                yAxisId="left"
-                orientation="left"
-                tickFormatter={(value: number) => `$${(value / 1000000).toFixed(0)}M`}
-                tick={{ fill: '#3b82f6', fontSize: 12 }}
+                domain={[0, (dataMax: number) => Math.ceil(dataMax * 1.2)]}
+                tickFormatter={(value) => `$${(value / 1000000).toFixed(0)}M`}
+                tick={{ fill: '#64748b', fontSize: 11 }}
                 tickLine={false}
                 axisLine={false}
-                width={60}
+                width={50}
+                tickCount={6}
               />
               
-              {/* Eje Y Derecho (Cantidad) */}
-              <YAxis 
-                yAxisId="right"
-                orientation="right"
-                tick={{ fill: '#10b981', fontSize: 12 }}
-                tickLine={false}
-                axisLine={false}
-                width={40}
-              />
-              
-              {/* Tooltip personalizado */}
               <Tooltip 
-                content={({ active, payload, label }) => {
-                  if (active && payload && payload.length) {
-                    const amountData = payload.find(p => p.dataKey === 'amount');
-                    const countData = payload.find(p => p.dataKey === 'count');
-                    
-                    return (
-                      <div className="bg-white p-3 border border-gray-200 rounded-lg shadow-lg">
-                        <p className="font-semibold text-gray-800">{label}</p>
-                        <div className="mt-1">
-                          <p className="text-sm text-blue-600">
-                            <span className="font-medium">Total: </span>
-                            {amountData?.payload.formattedAmount}
-                          </p>
-                          <p className="text-sm text-green-600">
-                            <span className="font-medium">Facturas: </span>
-                            {countData?.payload.formattedCount}
-                          </p>
-                        </div>
-                      </div>
-                    );
-                  }
-                  return null;
+                contentStyle={{
+                  backgroundColor: colors.tooltipBg,
+                  border: `1px solid ${colors.grid}`,
+                  borderRadius: '8px',
+                  padding: '8px 12px',
+                  boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)'
                 }}
+                labelStyle={{
+                  color: colors.text,
+                  fontWeight: 500,
+                  fontSize: '12px',
+                  marginBottom: '4px'
+                }}
+                itemStyle={{
+                  color: colors.text,
+                  fontSize: '12px',
+                  padding: '2px 0'
+                }}
+                formatter={(value: number) => [
+                  formatCurrency(Number(value)),
+                  'Total facturado'
+                ]}
+                labelFormatter={(label) => `Mes: ${label}`}
               />
               
-              {/* Leyenda personalizada */}
-              <Legend 
-                verticalAlign="top"
-                height={36}
-                formatter={(value) => (
-                  <span className="text-xs font-medium text-gray-600">
-                    {value === 'amount' ? 'Monto Total' : 'Cantidad de Facturas'}
-                  </span>
-                )}
-              />
+              <ReferenceLine y={0} stroke={colors.grid} />
               
-              {/* Gráfico de barras para la cantidad de facturas */}
-              <Bar
-                yAxisId="right"
-                dataKey="count"
-                name="Cantidad de Facturas"
-                fill="#10b981"
-                radius={[4, 4, 0, 0]}
-                barSize={24}
-              >
-                <LabelList 
-                  dataKey="count" 
-                  position="top" 
-                  fill="#065f46"
-                  fontSize={11}
-                  fontWeight={500}
-                  formatter={(value: number) => value > 0 ? value : ''}
-                />
-              </Bar>
-              
-              {/* Línea para el monto total */}
               <Line
-                yAxisId="left"
                 type="monotone"
-                dataKey="amount"
-                name="Monto Total"
-                stroke="#3b82f6"
+                dataKey="monto"
+                stroke="url(#lineGradient)"
                 strokeWidth={2.5}
                 dot={{
-                  fill: '#3b82f6',
-                  stroke: '#fff',
+                  fill: '#ffffff',
+                  stroke: 'currentColor',
                   strokeWidth: 2,
-                  r: 5,
-                  strokeOpacity: 0.9
+                  r: 4,
+                  strokeOpacity: 0.9,
+                  style: {
+                    filter: 'drop-shadow(0px 2px 4px rgba(0, 0, 0, 0.1))'
+                  }
                 }}
                 activeDot={{
-                  r: 7,
-                  stroke: '#fff',
+                  r: 6,
+                  stroke: '#ffffff',
                   strokeWidth: 2,
-                  fill: '#2563eb'
-                }}
-              >
-                <LabelList 
-                  dataKey="amount" 
-                  position="top" 
-                  fill="#1e40af"
-                  fontSize={11}
-                  fontWeight={500}
-                  offset={10}
-                  formatter={(value: number) => 
-                    value > 0 ? `$${(value / 1000000).toFixed(1)}M` : ''
+                  fill: colors.primary,
+                  style: {
+                    filter: 'drop-shadow(0px 2px 6px rgba(0, 0, 0, 0.15))'
                   }
-                />
-              </Line>
-            </ComposedChart>
+                }}
+              />
+            </LineChart>
           </ResponsiveContainer>
         </div>
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   );
 }
