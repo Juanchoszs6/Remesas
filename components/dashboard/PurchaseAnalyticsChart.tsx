@@ -19,16 +19,6 @@ import { es } from 'date-fns/locale';
 import { Button } from '@/components/ui/button';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 
-/**
- * PurchaseAnalyticsChart.tsx - Versión corregida final
- *
- * Cambios clave:
- *  - No usar authFetch para llamadas a /api/... locales (evita reintentos/401 incorrectos desde cliente).
- *  - authFetch se usa solo para llamadas externas (DATA_SOURCE === 'siigo').
- *  - Manejo explícito de 401 desde API local con mensaje claro.
- *  - Mantiene manejo 429, backoff, jitter, throttling y cache en sessionStorage.
- */
-
 /* ---------- Config ---------- */
 const DEBUG = true;
 const PER_PAGE = 100;
@@ -43,7 +33,6 @@ const MAX_RETRIES_PER_PAGE = 5; // intentos por pagina antes de skip
 //              'siigo' -> llama directamente a Siigo API (requiere CORS y token, no recomendado en prod)
 const DATA_SOURCE: 'local' | 'siigo' = 'local';
 
-// Si usas DATA_SOURCE === 'siigo', SIIGO_BASE_URL se toma de env; si no, no se usa.
 const SIIGO_BASE_URL = (typeof process !== 'undefined' && (process.env as any)?.SIIGO_BASE_URL) || 'https://api.siigo.com/v1';
 
 /* ---------- Types ---------- */
@@ -372,21 +361,46 @@ const buildFetchUrl = (base: string, page: number) => base.includes('?') ? `${ba
 const fetchAllPagesFactory = (authFetchLocal: typeof authFetch, progressCb?: (p: LoadingProgress) => void) => {
   return async (baseUrl: string, maxRetriesForPage = MAX_RETRIES_PER_PAGE): Promise<any[]> => {
     const collected: any[] = [];
-    let page = 1;
-    let totalPages: number | null = null;
-    let consecutiveEmpty = 0;
 
-    // helper para detectar local API
+    // helper para detectar local API (usa origin también si se pasa absolute)
     const isLocalApi = (u: string) => {
       try {
         if (typeof window === 'undefined') return u.startsWith('/api/');
-        // allow absolute origin too
         const origin = window.location.origin;
         return u.startsWith('/api/') || u.startsWith(`${origin}/api/`);
       } catch (e) {
         return u.startsWith('/api/');
       }
     };
+
+    // Si es API local -> hacemos **UNA SOLA** petición y esperamos que el servidor haga la paginación.
+    if (isLocalApi(baseUrl)) {
+      try {
+        log.debug('[PAC] isLocalApi detected -> requesting server-side pagination for', baseUrl);
+        const res = await fetch(baseUrl, { method: 'GET', credentials: 'same-origin' });
+        if (!res.ok) {
+          const t = await res.text().catch(() => res.statusText);
+          throw new Error(`Local API HTTP ${res.status}: ${t}`);
+        }
+        const body = await res.json().catch(() => null);
+        if (!body) return [];
+        if (Array.isArray(body)) return body;
+        if (Array.isArray(body?.purchases)) return body.purchases;
+        if (Array.isArray(body?.results)) return body.results;
+        if (Array.isArray(body?.data)) return body.data;
+        const props = ['invoices','items','documents','rows'];
+        for (const p of props) if (Array.isArray(body?.[p])) return body[p];
+        return [];
+      } catch (err: any) {
+        log.error('[PAC] fetchAllPages local error:', err?.message || err);
+        throw err;
+      }
+    }
+
+    // Si llegamos aquí -> llamada a API externa (no local) -> mantenemos la lógica robusta existente (authFetch)
+    let page = 1;
+    let totalPages: number | null = null;
+    let consecutiveEmpty = 0;
 
     while (page <= MAX_PAGE_SAFE && (totalPages === null || page <= totalPages)) {
       const url = buildFetchUrl(baseUrl, page);
@@ -400,36 +414,17 @@ const fetchAllPagesFactory = (authFetchLocal: typeof authFetch, progressCb?: (p:
 
         try {
           log.debug(`[PAC] Request page ${page} attempt ${attempt}: ${url}`);
-          // Si la URL es local, usamos fetch normal y no intentamos refrescar token desde cliente.
-          let res: Response;
-          if (isLocalApi(url)) {
-            res = await fetch(url, { method: 'GET', credentials: 'same-origin', signal: controller.signal });
-          } else {
-            // externo -> usar authFetchLocal que maneja token/401/429
-            res = await authFetchLocal(url, { method: 'GET' }, true, controller.signal);
-          }
+          const res = await authFetchLocal(url, { method: 'GET' }, true, controller.signal);
           clearTimeout(timeoutId);
 
-          // 429 (rate limit) handling - aplicable tanto para local como externo
           if (res.status === 429) {
             const ra = res.headers.get('Retry-After');
             const wait = ra ? Number(ra) * 1000 : Math.min(60000, 1000 * Math.pow(2, attempt));
             log.warn(`[PAC] 429 en page ${page}. Esperando ${wait}ms`);
-            try { const b = await res.text().catch(() => ''); log.debug('[PAC] 429 body', b); } catch (e) {}
             await sleep(wait + randJitter(200));
-            continue; // reintentar la misma página
+            continue;
           }
 
-          // Si la API local devolvió 401 -> es un problema server-side, no refrescamos en cliente
-          if (res.status === 401 && isLocalApi(url)) {
-            clearTimeout(timeoutId);
-            // lee body si hay para dar info más útil
-            let body = '';
-            try { body = await res.text().catch(() => ''); } catch (e) { /* ignore */ }
-            throw new Error(`Unauthorized (401) desde API local (${url}). Revisa /api/siigo/get-purchases y /api/siigo/get-token en el servidor. Body: ${body}`);
-          }
-
-          // Si no ok y no es 401 local, manejar normalmente (esto cubrirá errores externos)
           if (!res.ok) {
             const t = await res.text().catch(() => res.statusText);
             throw new Error(`HTTP ${res.status}: ${t}`);
@@ -467,11 +462,7 @@ const fetchAllPagesFactory = (authFetchLocal: typeof authFetch, progressCb?: (p:
             if (Array.isArray(pageData)) collected.push(...pageData);
           }
 
-          // update progress callback
-          if (progressCb) {
-            progressCb({ currentPage: page, totalPages: totalPages || 0, totalRecords: collected.length });
-          }
-
+          if (progressCb) progressCb({ currentPage: page, totalPages: totalPages || 0, totalRecords: collected.length });
           pageSucceeded = true;
         } catch (err: any) {
           clearTimeout(timeoutId);
@@ -495,7 +486,6 @@ const fetchAllPagesFactory = (authFetchLocal: typeof authFetch, progressCb?: (p:
       } // end attempts
 
       page++;
-      // small throttle to avoid hitting rate limits between pages
       await sleep(MIN_THROTTLE_MS + Math.floor(Math.random() * 120));
     } // end pages
 
@@ -549,15 +539,17 @@ export default function PurchaseAnalyticsChart(): React.ReactElement {
     const end = `${year}-${String(monthOne).padStart(2,'0')}-${String(new Date(year, monthOne, 0).getDate()).padStart(2,'0')}`;
 
     if (DATA_SOURCE === 'local') {
-      return `/api/siigo/get-purchases?get_all_pages=true&start_date=${start}&end_date=${end}`;
+      return `/api/siigo/get-purchases?get_all_pages=true&start_date=${start}&end_date=${end}&per_page=${PER_PAGE}`;
     } else {
       // direct Siigo API (requiere CORS y token)
-      // using SIIGO_BASE_URL from env
-      return `${SIIGO_BASE_URL}/purchases?start_date=${start}&end_date=${end}`;
+      return `${SIIGO_BASE_URL}/purchases?start_date=${start}&end_date=${end}&per_page=${PER_PAGE}`;
     }
   };
 
-  // primary fetch function (secuencia por mes)
+  // helper last day
+  const lastDayOf = (y: number, m: number) => new Date(y, m + 1, 0).getDate();
+
+  // primary fetch function (secuencia por mes) - AHORA con intento YTD (enero -> hoy)
   const fetchPurchaseData = useCallback(async () => {
     setIsLoading(true);
     setError(null);
@@ -566,90 +558,139 @@ export default function PurchaseAnalyticsChart(): React.ReactElement {
     try {
       log.info(`[PAC] Iniciando carga año ${selectedYear}`);
       const monthlyCollected: any[] = [];
-      const lastDayOf = (y: number, m: number) => new Date(y, m + 1, 0).getDate();
 
-      // strategy: sequential per month to avoid many parallel requests and token expiry
-      for (let month = 0; month < 12; month++) {
-        const start = `${selectedYear}-${String(month + 1).padStart(2,'0')}-01`;
-        const end = `${selectedYear}-${String(month + 1).padStart(2,'0')}-${String(lastDayOf(selectedYear, month)).padStart(2,'0')}`;
-        const cacheKey = cacheKeyForRange(start, end);
+      const now = new Date();
+      const currentYear = now.getFullYear();
+      const currentMonthZeroIndex = now.getMonth();
+
+      // If selectedYear is current year -> try single YTD request first
+      if (selectedYear === currentYear) {
+        const startYTD = `${selectedYear}-01-01`;
+        const endYTD = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+        const ytdCacheKey = cacheKeyForRange(startYTD, endYTD);
+
         if (useCache) {
-          const cached = getCache(cacheKey);
-          if (cached && Array.isArray(cached) && cached.length > 0) {
-            log.debug(`[PAC] Cache hit ${cacheKey} -> ${cached.length} registros`);
-            monthlyCollected.push(...cached);
-            // small throttle to keep behavior consistent
-            await sleep(60 + Math.floor(Math.random() * 120));
-            continue;
+          const cachedYtd = getCache(ytdCacheKey);
+          if (cachedYtd && Array.isArray(cachedYtd) && cachedYtd.length > 0) {
+            log.debug(`[PAC] Cache hit YTD ${ytdCacheKey} -> ${cachedYtd.length} registros`);
+            monthlyCollected.push(...cachedYtd);
+          } else {
+            // attempt single YTD fetch (server paginates)
+            try {
+              const url = DATA_SOURCE === 'local'
+                ? `/api/siigo/get-purchases?get_all_pages=true&start_date=${startYTD}&end_date=${endYTD}&per_page=${PER_PAGE}`
+                : `${SIIGO_BASE_URL}/purchases?start_date=${startYTD}&end_date=${endYTD}&per_page=${PER_PAGE}`;
+
+              log.debug('[PAC] Intentando cargar YTD con URL:', url);
+              const resArr = await fetchAllPages(url);
+              if (resArr && resArr.length > 0) {
+                monthlyCollected.push(...resArr);
+                if (useCache) setCache(ytdCacheKey, resArr, CACHE_TTL_MS);
+                log.info(`[PAC] YTD cargado: ${resArr.length} registros (inicio=${startYTD} end=${endYTD})`);
+              } else {
+                log.warn('[PAC] YTD devolvió arreglo vacío, se hará fallback por meses');
+              }
+            } catch (ytdErr) {
+              log.warn('[PAC] Falló YTD fetch, se hará fallback por meses:', ytdErr);
+              // continue to monthly fallback
+            }
+          }
+        } else {
+          // no cache -> attempt YTD fetch
+          try {
+            const url = DATA_SOURCE === 'local'
+              ? `/api/siigo/get-purchases?get_all_pages=true&start_date=${startYTD}&end_date=${endYTD}&per_page=${PER_PAGE}`
+              : `${SIIGO_BASE_URL}/purchases?start_date=${startYTD}&end_date=${endYTD}&per_page=${PER_PAGE}`;
+
+            log.debug('[PAC] Intentando cargar YTD (no-cache) con URL:', url);
+            const resArr = await fetchAllPages(url);
+            if (resArr && resArr.length > 0) {
+              monthlyCollected.push(...resArr);
+              if (useCache) setCache(ytdCacheKey, resArr, CACHE_TTL_MS);
+              log.info(`[PAC] YTD cargado: ${resArr.length} registros (inicio=${startYTD} end=${endYTD})`);
+            } else {
+              log.warn('[PAC] YTD devolvió arreglo vacío, se hará fallback por meses');
+            }
+          } catch (ytdErr) {
+            log.warn('[PAC] Falló YTD fetch (no-cache), se hará fallback por meses:', ytdErr);
           }
         }
+      }
 
-        // try multiple URL patterns for compatibility
-        const urlsToTry = [
-          resolveBaseUrlForMonth(selectedYear, month),
-          DATA_SOURCE === 'local'
-            ? `/api/siigo/get-purchases?get_all_pages=true&year=${selectedYear}&month=${month + 1}`
-            : `${SIIGO_BASE_URL}/purchases?year=${selectedYear}&month=${month+1}`,
-          DATA_SOURCE === 'local'
-            ? `/api/siigo/get-purchases?get_all_pages=true&year=${selectedYear}&month=${month + 1}&per_page=${PER_PAGE}`
-            : `${SIIGO_BASE_URL}/purchases?year=${selectedYear}&month=${month+1}&per_page=${PER_PAGE}`
-        ];
-
-        let monthData: any[] = [];
-        let tried = 0;
-
-        for (const u of urlsToTry) {
-          tried++;
-          try {
-            log.debug(`[PAC] Fetching mes ${month + 1}/${selectedYear} intento ${tried}: ${u}`);
-            await sleep(120 + Math.floor(Math.random() * 200)); // jitter before attempt
-
-            // When DATA_SOURCE === 'siigo', calling direct Siigo endpoints may require different auth;
-            // fetchAllPages will decide whether to use authFetch or fetch depending on URL.
-            const resArr = await fetchAllPages(u);
-            if (resArr && resArr.length > 0) {
-              monthData = resArr;
-              log.info(`[PAC] Mes ${month + 1} cargado: ${resArr.length} registros (url usada: ${u})`);
-              // save to cache
-              if (useCache) setCache(cacheKey, resArr, CACHE_TTL_MS);
-              break;
-            } else {
-              log.debug(`[PAC] Mes ${month + 1} respuesta vacía con url ${u}`);
+      // If YTD didn't fill monthlyCollected (or selectedYear != currentYear), fallback to month-by-month
+      if (selectedYear !== currentYear || monthlyCollected.length === 0) {
+        const lastMonthIndex = (selectedYear === currentYear) ? currentMonthZeroIndex : 11;
+        for (let month = 0; month <= lastMonthIndex; month++) {
+          const start = `${selectedYear}-${String(month + 1).padStart(2,'0')}-01`;
+          const end = `${selectedYear}-${String(month + 1).padStart(2,'0')}-${String(lastDayOf(selectedYear, month)).padStart(2,'0')}`;
+          const cacheKey = cacheKeyForRange(start, end);
+          if (useCache) {
+            const cached = getCache(cacheKey);
+            if (cached && Array.isArray(cached) && cached.length > 0) {
+              log.debug(`[PAC] Cache hit ${cacheKey} -> ${cached.length} registros`);
+              monthlyCollected.push(...cached);
+              // small throttle to keep behavior consistent
+              await sleep(60 + Math.floor(Math.random() * 120));
+              continue;
             }
-          } catch (err) {
-            log.warn(`[PAC] Error cargando mes ${month + 1} con url ${u}:`, err);
-            const m = String(err).toLowerCase();
-            if (m.includes('unauthoriz')) {
-              // Si la API local devolvió 401, informamos claramente
-              throw new Error('Unauthorized (401) durante fetch mensual. Revisa token o endpoint de refresh en el servidor (/api/siigo/get-token).');
-            }
-            // detect si response incluye rate-limit message
-            if (String(err).includes('requests_limit') || String(err).includes('rate limit')) {
-              log.warn('[PAC] Detectado message de rate limit en error, esperando 8s');
-              await sleep(8000 + Math.floor(Math.random() * 200));
-            }
-            await sleep(400 + Math.floor(Math.random() * 300));
-            continue;
           }
-        } // end urlsToTry
 
-        if (monthData && monthData.length > 0) monthlyCollected.push(...monthData);
-        // Espera adicional entre meses para reducir probabilidades de 429
-        await sleep(240 + Math.floor(Math.random() * 380));
-      } // end months
+          // try multiple URL patterns for compatibility (server will normally handle pagination)
+          const urlsToTry = [
+            resolveBaseUrlForMonth(selectedYear, month),
+            DATA_SOURCE === 'local'
+              ? `/api/siigo/get-purchases?get_all_pages=true&year=${selectedYear}&month=${month + 1}`
+              : `${SIIGO_BASE_URL}/purchases?year=${selectedYear}&month=${month+1}`,
+            DATA_SOURCE === 'local'
+              ? `/api/siigo/get-purchases?get_all_pages=true&year=${selectedYear}&month=${month + 1}&per_page=${PER_PAGE}`
+              : `${SIIGO_BASE_URL}/purchases?year=${selectedYear}&month=${month+1}&per_page=${PER_PAGE}`
+          ];
 
-      log.info(`[PAC] Carga mensual completada. Registros totales sin dedupe: ${monthlyCollected.length}`);
+          let monthData: any[] = [];
+          let tried = 0;
+
+          for (const u of urlsToTry) {
+            tried++;
+            try {
+              log.debug(`[PAC] Fetching mes ${month + 1}/${selectedYear} intento ${tried}: ${u}`);
+              await sleep(120 + Math.floor(Math.random() * 200)); // jitter before attempt
+
+              const resArr = await fetchAllPages(u);
+              if (resArr && resArr.length > 0) {
+                monthData = resArr;
+                log.info(`[PAC] Mes ${month + 1} cargado: ${resArr.length} registros (url usada: ${u})`);
+                // save to cache
+                if (useCache) setCache(cacheKey, resArr, CACHE_TTL_MS);
+                break;
+              } else {
+                log.debug(`[PAC] Mes ${month + 1} respuesta vacía con url ${u}`);
+              }
+            } catch (err) {
+              log.warn(`[PAC] Error cargando mes ${month + 1} con url ${u}:`, err);
+              const m = String(err).toLowerCase();
+              if (m.includes('unauthoriz')) {
+                // Si la API local devolvió 401, informamos claramente
+                throw new Error('Unauthorized (401) durante fetch mensual. Revisa token o endpoint de refresh en el servidor (/api/siigo/get-token).');
+              }
+              if (String(err).includes('requests_limit') || String(err).includes('rate limit')) {
+                log.warn('[PAC] Detectado message de rate limit en error, esperando 8s');
+                await sleep(8000 + Math.floor(Math.random() * 200));
+              }
+              await sleep(400 + Math.floor(Math.random() * 300));
+              continue;
+            }
+          } // end urlsToTry
+
+          if (monthData && monthData.length > 0) monthlyCollected.push(...monthData);
+          // Espera adicional entre meses para reducir probabilidades de 429
+          await sleep(240 + Math.floor(Math.random() * 380));
+        } // end months
+      }
+
+      log.info(`[PAC] Carga completada. Registros totales sin dedupe: ${monthlyCollected.length}`);
 
       const deduped = dedupeInvoices(monthlyCollected);
       log.info(`[PAC] Después de dedupe: ${deduped.length} facturas únicas`);
-
-      const distribution = deduped.reduce((acc: Record<string, number>, inv: any) => {
-        const d = parseInvoiceDate(inv);
-        const key = d ? `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}` : 'sin-fecha';
-        acc[key] = (acc[key] || 0) + 1;
-        return acc;
-      }, {});
-      log.info('[PAC] Distribución por mes (post-dedupe):', distribution);
 
       if (isMounted.current) {
         setAllInvoices(prev => {
@@ -694,11 +735,28 @@ export default function PurchaseAnalyticsChart(): React.ReactElement {
     }
   }, [fetchAllPages, selectedYear, useCache]);
 
+  // each time year changes, fetch data
   useEffect(() => {
-    // each time year changes, fetch data
     fetchPurchaseData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedYear]);
+
+  // Re-fetch automatically at start of next month (works while user has the app open)
+  useEffect(() => {
+    let timeoutId: number | null = null;
+    const scheduleNextMonthUpdate = () => {
+      const now = new Date();
+      const nextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1, 0, 5, 0); // 00:05 del primer día del próximo mes
+      const ms = nextMonth.getTime() - now.getTime();
+      timeoutId = window.setTimeout(() => {
+        log.info('[PAC] Mes nuevo detectado -> refrescando datos automáticamente');
+        fetchPurchaseData();
+        scheduleNextMonthUpdate(); // reprograma para el siguiente mes
+      }, ms);
+    };
+    scheduleNextMonthUpdate();
+    return () => { if (timeoutId) clearTimeout(timeoutId); };
+  }, [fetchPurchaseData]);
 
   /* ---------- auxiliares y render ---------- */
   const generateEmptyYearData = (year: number): ChartData[] => {
