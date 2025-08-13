@@ -10,34 +10,70 @@ export async function obtenerTokenSiigo(): Promise<string | null> {
     return null;
   }
 
-  const credentials = Buffer.from(`${username}:${accessKey}`).toString('base64');
+  // Intentar hasta 3 veces obtener un token válido
+  for (let intento = 1; intento <= 3; intento++) {
+    try {
+      console.log(`[SIIGO-AUTH] Intento ${intento} de obtener token de Siigo`);
+      
+      const response = await fetch('https://api.siigo.com/auth', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Partner-Id': partnerId,
+        },
+        body: JSON.stringify({
+          username,
+          access_key: accessKey,
+        }),
+        cache: 'no-store', // Asegurarse de no usar caché
+      });
 
-  try {
-    const response = await fetch('https://api.siigo.com/auth', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Basic ${credentials}`,
-        'Partner-Id': partnerId,
-      },
-      body: JSON.stringify({
-        username,
-        access_key: accessKey,
-      }),
-    });
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error(`[SIIGO-AUTH] ❌ Error en autenticación (intento ${intento}):`, errorText);
+        
+        // Si es el último intento, retornar null
+        if (intento === 3) {
+          return null;
+        }
+        
+        // Esperar antes de reintentar (backoff exponencial)
+        await new Promise(resolve => setTimeout(resolve, 1000 * intento));
+        continue;
+      }
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('[SIIGO-AUTH] ❌ Error en autenticación:', errorText);
-      return null;
+      const data = await response.json();
+      const token = data.access_token;
+      
+      if (!token) {
+        console.error(`[SIIGO-AUTH] ❌ No se recibió token en la respuesta (intento ${intento})`);
+        
+        // Si es el último intento, retornar null
+        if (intento === 3) {
+          return null;
+        }
+        
+        // Esperar antes de reintentar
+        await new Promise(resolve => setTimeout(resolve, 1000 * intento));
+        continue;
+      }
+      
+      console.log(`[SIIGO-AUTH] ✅ Token obtenido exitosamente en el intento ${intento}`);
+      return token;
+    } catch (error) {
+      console.error(`[SIIGO-AUTH] 💥 Error al obtener token (intento ${intento}):`, error);
+      
+      // Si es el último intento, retornar null
+      if (intento === 3) {
+        return null;
+      }
+      
+      // Esperar antes de reintentar
+      await new Promise(resolve => setTimeout(resolve, 1000 * intento));
     }
-
-    const data = await response.json();
-    return data.access_token || null;
-  } catch (error) {
-    console.error('[SIIGO-AUTH] 💥 Error al obtener token:', error);
-    return null;
   }
+  
+  return null;
 }
 
 export async function POST() {

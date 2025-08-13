@@ -171,6 +171,15 @@ export default function DashboardContent({ user }: DashboardContentProps) {
                 <FileText className="h-4 w-4 mr-2" />
                 Formulario SIIGO
               </Button>
+              
+              <Button 
+                className="w-full justify-start" 
+                variant="outline"
+                onClick={() => router.push('/cufe')}
+              >
+                <FileText className="h-4 w-4 mr-2" />
+                Consulta por CUFE
+              </Button>
 
             </CardContent>
           </Card>
