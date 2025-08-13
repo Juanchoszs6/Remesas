@@ -14,6 +14,7 @@ interface SiigoSupplier {
 interface SiigoProviderInvoice {
   prefix: string;
   number: string;
+  cufe?: string;
 }
 
 interface SiigoCurrency {
@@ -80,6 +81,7 @@ interface RequestBody {
   documentId: string;
   providerInvoiceNumber: string;
   providerInvoicePrefix?: string;
+  cufe?: string;
   invoiceDate: string;
   ivaPercentage?: number;
   observations?: string;
@@ -231,8 +233,8 @@ export async function POST(request: NextRequest) {
         siigoItem.discount = item.discount.value;
       }
 
-      // Agregar impuestos si el item tiene IVA
-      if (item.hasIVA !== false) {
+      // Agregar impuestos solo si el item tiene IVA explícitamente marcado como true
+      if (item.hasIVA === true) {
         siigoItem.taxes = [{ id: 13156 }]; // ID estándar para IVA 19% en Siigo
       }
 
@@ -261,10 +263,11 @@ export async function POST(request: NextRequest) {
         }
       ],
       cost_center: body.costCenter,
-      provider_invoice: body.providerInvoicePrefix && body.providerInvoiceNumber ? {
-        prefix: body.providerInvoicePrefix,
-        number: body.providerInvoiceNumber
-      } : undefined,
+      provider_invoice: {
+        prefix: body.providerInvoicePrefix || 'FC',
+        number: body.providerInvoiceNumber,
+        ...(body.cufe && { cufe: body.cufe })
+      },
       currency: body.currency,
       observations: body.observations,
       discount_type: 'Value',

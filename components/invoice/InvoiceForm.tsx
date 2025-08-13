@@ -1,16 +1,24 @@
 import { useReducer, useState, useCallback } from 'react';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Textarea } from '@/components/ui/textarea';
-import { toast } from 'sonner';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { Button } from "@/components/ui/button";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { 
+  Send, 
+  Plus, 
+  Trash2, 
+  Loader2, 
+  CheckCircle2 as CheckCircledIcon, 
+  AlertTriangle as ExclamationTriangleIcon 
+} from "lucide-react";
+import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 import { InvoiceItemForm } from "@/components/invoice/InvoiceItemForm";
 import { InvoiceItem, SiigoPurchaseItemRequest, SiigoPaymentRequest } from "@/types/siigo";
-import { Plus, Send } from 'lucide-react';
 import { Separator } from '@/components/ui/separator';
 import { Autocomplete } from '@/components/autocomplete';
-import { useRouter } from 'next/navigation';
 
 interface Provider {
   identificacion: string;
@@ -38,6 +46,7 @@ interface InvoiceState {
   ivaPercentage: number;
   providerCode: string;
   providerIdentification: string;
+  cufe?: string;
   costCenter?: number;
   currency?: {
     code: string;
@@ -60,6 +69,7 @@ const initialState: InvoiceState = {
   provider: null,
   providerCode: "",
   providerIdentification: "",
+  cufe: "",
   invoiceDate: new Date().toISOString().split('T')[0],
   documentId: "1",
   providerInvoiceNumber: "",
@@ -192,6 +202,8 @@ export function InvoiceForm() {
   const router = useRouter();
   const [state, dispatch] = useReducer(invoiceFormReducer, initialState);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isSearching, setIsSearching] = useState(false);
+  const [searchCufe, setSearchCufe] = useState('');
   const [submitResult, setSubmitResult] = useState<{ success: boolean; message: string } | null>(null);
 
   const handleAddItem = useCallback(() => {
@@ -275,19 +287,26 @@ export function InvoiceForm() {
     const fechaFormateada = state.invoiceDate;
 
     // Mapear los ítems al formato de Siigo
-    const items: SiigoPurchaseItemRequest[] = state.items.map(item => ({
-      type: mapItemTypeToSiigoType(item.type),
-      code: item.code,
-      description: item.description || item.code,
-      quantity: Number(item.quantity) || 1,
-      price: Number(item.price) || 0,
-      discount: item.discount?.value || 0,
-      taxes: item.hasIVA !== false ? [{
-        id: 18384, // ID real del impuesto IVA, ajusta según tu configuración
-        tax_base: (item.price || 0) * (item.quantity || 0),
-        type: "IVA"
-      }] : []
-    }));
+    const items: SiigoPurchaseItemRequest[] = state.items.map(item => {
+      const itemSubtotal = (item.quantity || 0) * (item.price || 0);
+      const discount = item.discount?.value || 0;
+      const taxableAmount = itemSubtotal - discount;
+      
+      return {
+        type: mapItemTypeToSiigoType(item.type),
+        code: item.code,
+        description: item.description || item.code,
+        quantity: Number(item.quantity) || 1,
+        price: Number(item.price) || 0,
+        discount: discount,
+        taxes: item.hasIVA ? [{
+          id: 18384, // ID del impuesto IVA
+          tax_base: taxableAmount,
+          type: "IVA"
+        }] : [],
+        warehouse: item.warehouse || '1'
+      };
+    });
 
     const total = calculateTotal(state.items, state.ivaPercentage);
 
@@ -311,12 +330,14 @@ export function InvoiceForm() {
       cost_center: state.costCenter,
       provider_invoice: {
         prefix: state.providerInvoicePrefix || "FC",
-        number: state.providerInvoiceNumber ? String(Number(state.providerInvoiceNumber)) : null
+        number: state.providerInvoiceNumber ? String(Number(state.providerInvoiceNumber)) : null,
+        // Incluir CUFE si está presente
+        ...(state.cufe && { cufe: state.cufe })
       },
       currency: state.currency,
       discount_type: "Value",
       supplier_by_item: false,
-      tax_included: false,
+      tax_included: false, // Los impuestos se manejan por ítem
       observations: state.observations || "",
       items,
       payments: [payment]
@@ -376,21 +397,195 @@ export function InvoiceForm() {
     }
   }, [state, validateForm, buildSiigoPayload, router]);
 
-  // El resto del JSX permanece igual...
+  // Buscar factura por CUFE
+  const handleSearchByCufe = useCallback(async () => {
+    if (!searchCufe) return;
+    
+    setIsSearching(true);
+    try {
+      const response = await fetch(`/api/siigo/search-invoice?cufe=${encodeURIComponent(searchCufe)}`);
+      const data = await response.json();
+      
+      if (response.ok && data.success && data.data) {
+        const invoice = data.data;
+        
+        // Actualizar el campo CUFE del formulario con el valor buscado
+        dispatch({
+          type: 'UPDATE_FIELD',
+          payload: { field: 'cufe', value: searchCufe }
+        });
+        
+        // Actualizar el estado con los datos de la factura encontrada
+        // Crear un objeto de proveedor con valores por defecto
+        const defaultProvider: Provider = {
+          identificacion: invoice.supplier?.identification || '',
+          nombre: invoice.supplier?.name || 'Proveedor no especificado',
+          tipo_documento: '31', // Valor por defecto para NIT
+          nombre_comercial: invoice.supplier?.name || 'Proveedor no especificado',
+          ciudad: 'Bogotá', // Valor por defecto
+          direccion: 'No especificada',
+          telefono: '0000000',
+          correo_electronico: 'no@especificado.com',
+          codigo: invoice.supplier?.identification || '',
+          branch_office: invoice.supplier?.branch_office || 0,
+        };
+        
+        dispatch({ 
+          type: 'SET_PROVIDER', 
+          payload: defaultProvider
+        });
+        
+        // Actualizar número de factura si está disponible
+        if (invoice.provider_invoice?.number) {
+          dispatch({ 
+            type: 'UPDATE_FIELD', 
+            payload: { 
+              field: 'providerInvoiceNumber', 
+              value: invoice.provider_invoice.number 
+            } 
+          });
+        }
+        
+        // Actualizar prefijo de factura si está disponible
+        if (invoice.provider_invoice?.prefix) {
+          dispatch({ 
+            type: 'UPDATE_FIELD', 
+            payload: { 
+              field: 'providerInvoicePrefix', 
+              value: invoice.provider_invoice.prefix 
+            } 
+          });
+        }
+        
+        // Actualizar fecha de factura si está disponible
+        if (invoice.date) {
+          dispatch({ 
+            type: 'UPDATE_FIELD', 
+            payload: { 
+              field: 'invoiceDate', 
+              value: invoice.date 
+            } 
+          });
+        }
+        
+        // Actualizar observaciones si están disponibles
+        if (invoice.observations) {
+          dispatch({ 
+            type: 'UPDATE_FIELD', 
+            payload: { 
+              field: 'observations', 
+              value: invoice.observations 
+            } 
+          });
+        }
+        
+        // Actualizar centro de costos si está disponible
+        if (invoice.cost_center) {
+          dispatch({ 
+            type: 'UPDATE_FIELD', 
+            payload: { 
+              field: 'costCenter', 
+              value: invoice.cost_center 
+            } 
+          });
+        }
+        
+        // Actualizar items si están disponibles
+        if (Array.isArray(invoice.items) && invoice.items.length > 0) {
+          // Primero limpiar los items actuales
+          state.items.forEach(item => {
+            dispatch({ type: 'REMOVE_ITEM', payload: item.id });
+          });
+          
+          // Agregar los nuevos items
+          invoice.items.forEach((item: any) => {
+            const newItem: InvoiceItem = {
+              id: Date.now().toString(),
+              type: item.type.toLowerCase(),
+              code: item.code,
+              description: item.description,
+              quantity: item.quantity,
+              price: item.price,
+              hasIVA: item.taxes && item.taxes.length > 0,
+              discount: item.discount ? { value: item.discount } : undefined,
+            };
+            dispatch({ type: 'ADD_ITEM', payload: newItem });
+          });
+        }
+        
+        toast.success('Factura cargada exitosamente desde el CUFE');
+      } else {
+        toast.error('No se encontró una factura con el CUFE proporcionado');
+      }
+    } catch (error) {
+      console.error('Error al buscar factura por CUFE:', error);
+      toast.error('Error al buscar la factura. Por favor, intente nuevamente.');
+    } finally {
+      setIsSearching(false);
+    }
+  }, [searchCufe, state.items, dispatch]);
+
   return (
     <div className="max-w-6xl mx-auto p-6 space-y-6">
+      {/* Sección de búsqueda de CUFE */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Buscar Factura por CUFE</CardTitle>
+          <CardDescription>
+            Ingrese el CUFE para buscar y cargar automáticamente los datos de la factura.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex gap-2">
+            <Input
+              placeholder="Ingrese el CUFE de la factura a buscar"
+              value={searchCufe}
+              onChange={(e) => setSearchCufe(e.target.value)}
+              className="flex-1"
+            />
+            <Button 
+              type="button"
+              onClick={handleSearchByCufe}
+              disabled={!searchCufe || isSearching}
+              variant="outline"
+            >
+              {isSearching ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Buscando...
+                </>
+              ) : (
+                'Buscar por CUFE'
+              )}
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
       {submitResult && (
-        <div className={`p-4 rounded-md mb-4 text-center ${submitResult.success ? 'bg-green-100 text-green-800 border border-green-300' : 'bg-red-100 text-red-800 border border-red-300'}`}>
-          {submitResult.message}
-        </div>
+        <Alert variant={submitResult.success ? 'default' : 'destructive'}>
+          {submitResult.success ? (
+            <CheckCircledIcon className="h-4 w-4" />
+          ) : (
+            <ExclamationTriangleIcon className="h-4 w-4" />
+          )}
+          <AlertTitle>
+            {submitResult.success ? '¡Éxito!' : 'Error'}
+          </AlertTitle>
+          <AlertDescription>{submitResult.message}</AlertDescription>
+        </Alert>
       )}
+
       <form onSubmit={handleSubmit} className="space-y-6">
-        {/* Información General */}
         <Card>
           <CardHeader>
-            <CardTitle>Información General</CardTitle>
+            <CardTitle>Crear Nueva Factura</CardTitle>
+            <CardDescription>
+              Complete los detalles de la factura a continuación.
+            </CardDescription>
           </CardHeader>
-          <CardContent className="space-y-4">
+          <CardContent>
+            {/* Información General */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div className="space-y-2">
                 <Autocomplete
@@ -411,6 +606,37 @@ export function InvoiceForm() {
                   readOnly
                   className="bg-gray-100 cursor-not-allowed"
                   tabIndex={-1}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="cufe">CUFE (Código Único de Factura Electrónica)</Label>
+                <Input
+                  id="cufe"
+                  placeholder="Ingrese el CUFE de la factura"
+                  value={state.cufe || ''}
+                  onChange={(e) =>
+                    dispatch({ 
+                      type: 'UPDATE_FIELD', 
+                      payload: { field: 'cufe', value: e.target.value } 
+                    })
+                  }
+                />
+                <p className="text-xs text-muted-foreground">
+                  Este es el CUFE que se enviará con la factura. Utilice la búsqueda superior para cargar datos existentes.
+                </p>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="provider-invoice-prefix">Prefijo de Factura</Label>
+                <Input
+                  id="provider-invoice-prefix"
+                  placeholder="Prefijo (opcional)"
+                  value={state.providerInvoicePrefix || ''}
+                  onChange={(e) =>
+                    dispatch({ 
+                      type: 'UPDATE_FIELD', 
+                      payload: { field: 'providerInvoicePrefix', value: e.target.value } 
+                    })
+                  }
                 />
               </div>
               <div className="space-y-2">
