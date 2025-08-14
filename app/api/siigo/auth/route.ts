@@ -3,10 +3,17 @@ import { NextResponse } from 'next/server';
 export async function obtenerTokenSiigo(): Promise<string | null> {
   const username = process.env.SIIGO_USERNAME;
   const accessKey = process.env.SIIGO_ACCESS_KEY;
-  const partnerId = process.env.SIIGO_PARTNER_ID || '';
+  const partnerId = process.env.SIIGO_PARTNER_ID || 'RemesasYMensajes';
+  const authUrl = process.env.SIIGO_AUTH_URL || 'https://api.siigo.com/auth';
 
   if (!username || !accessKey || !partnerId) {
-    console.error('[SIIGO-AUTH] ❌ Credenciales faltantes');
+    console.error('[SIIGO-AUTH] ❌ Credenciales faltantes en variables de entorno');
+    console.log('[SIIGO-AUTH] Variables disponibles:', { 
+      username: username ? '✅' : '❌',
+      accessKey: accessKey ? '✅' : '❌',
+      partnerId: partnerId ? '✅' : '❌',
+      authUrl: authUrl ? '✅' : '❌'
+    });
     return null;
   }
 
@@ -15,22 +22,39 @@ export async function obtenerTokenSiigo(): Promise<string | null> {
     try {
       console.log(`[SIIGO-AUTH] Intento ${intento} de obtener token de Siigo`);
       
-      const response = await fetch('https://api.siigo.com/auth', {
+      console.log(`[SIIGO-AUTH] Intentando autenticar en: ${authUrl}`);
+      
+      const requestBody = {
+        username,
+        access_key: accessKey,
+      };
+
+      console.log('[SIIGO-AUTH] Cuerpo de la solicitud:', JSON.stringify(requestBody));
+      
+      const response = await fetch(authUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Partner-Id': partnerId,
         },
-        body: JSON.stringify({
-          username,
-          access_key: accessKey,
-        }),
-        cache: 'no-store', // Asegurarse de no usar caché
+        body: JSON.stringify(requestBody),
+        cache: 'no-store',
       });
 
+      console.log(`[SIIGO-AUTH] Estado de la respuesta: ${response.status} ${response.statusText}`);
+
       if (!response.ok) {
-        const errorText = await response.text();
-        console.error(`[SIIGO-AUTH] ❌ Error en autenticación (intento ${intento}):`, errorText);
+        let errorDetails = '';
+        try {
+          const errorData = await response.json();
+          errorDetails = JSON.stringify(errorData);
+        } catch (e) {
+          errorDetails = await response.text();
+        }
+        
+        console.error(`[SIIGO-AUTH] ❌ Error en autenticación (intento ${intento}):`);
+        console.error(`- Status: ${response.status} ${response.statusText}`);
+        console.error(`- Detalles:`, errorDetails);
         
         // Si es el último intento, retornar null
         if (intento === 3) {

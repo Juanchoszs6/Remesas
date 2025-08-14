@@ -10,7 +10,7 @@ import { toast } from "sonner";
 import CufeInfoCard from "@/components/invoice/CufeInfoCard";
 import { useRouter } from 'next/navigation';
 
-export default function CufePage() 
+export default function CufePage() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const [cufe, setCufe] = useState<string>(searchParams.get('cufe') || '');

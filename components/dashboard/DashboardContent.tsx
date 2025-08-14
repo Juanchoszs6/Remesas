@@ -7,7 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
-import { LogOut, User as UserIcon, Mail, Calendar, Shield, FileText, BarChart2 } from 'lucide-react';
+import { LogOut, User as UserIcon, Mail, Calendar, Shield, FileText, BarChart2, Search } from 'lucide-react';
 import AnalyticsSection from './AnalyticsSection';
 import { toast } from 'sonner';
 
@@ -179,6 +179,15 @@ export default function DashboardContent({ user }: DashboardContentProps) {
               >
                 <FileText className="h-4 w-4 mr-2" />
                 Consulta por CUFE
+              </Button>
+              
+              <Button 
+                className="w-full justify-start" 
+                variant="outline"
+                onClick={() => router.push('/buscar-factura-avanzado')}
+              >
+                <Search className="h-4 w-4 mr-2" />
+                Búsqueda Avanzada de Facturas
               </Button>
 
             </CardContent>

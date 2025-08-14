@@ -446,23 +446,7 @@ export function InvoiceForm() {
                   tabIndex={-1}
                 />
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="cufe">CUFE (Código Único de Factura Electrónica)</Label>
-                <Input
-                  id="cufe"
-                  placeholder="Ingrese el CUFE de la factura"
-                  value={state.cufe || ''}
-                  onChange={(e) =>
-                    dispatch({ 
-                      type: 'UPDATE_FIELD', 
-                      payload: { field: 'cufe', value: e.target.value } 
-                    })
-                  }
-                />
-                <p className="text-xs text-muted-foreground">
-                  Este es el CUFE que se enviará con la factura. Utilice la búsqueda superior para cargar datos existentes.
-                </p>
-              </div>
+
               <div className="space-y-2">
                 <Label htmlFor="provider-invoice-prefix">Prefijo de Factura</Label>
                 <Input
