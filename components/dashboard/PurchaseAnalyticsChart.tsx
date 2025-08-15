@@ -819,10 +819,14 @@ export default function PurchaseAnalyticsChart(): React.ReactElement {
   };
 
   const handleYearChange = (inc: number) => {
+    const currentYear = new Date().getFullYear();
     const ny = selectedYear + inc;
-    const min = 2018;
-    const max = new Date().getFullYear() + 1;
-    if (ny >= min && ny <= max) setSelectedYear(ny);
+    // Prevent going back before 2025 in any case
+    const minYear = 2025;
+    const maxYear = currentYear + 1;
+    if (ny >= minYear && ny <= maxYear) {
+      setSelectedYear(ny);
+    }
   };
 
   const CustomTooltip = ({ active, payload }: { active?: boolean; payload?: any[] }) => {
@@ -888,13 +892,13 @@ export default function PurchaseAnalyticsChart(): React.ReactElement {
     <div className="w-full rounded-lg border bg-white p-4 shadow-sm">
       <div className="mb-4 flex items-center justify-between">
         <div>
-          <h3 className="text-lg font-semibold text-gray-800">Evolución Anual de Compras</h3>
-          <p className="text-sm text-gray-500">Total facturado por mes - {selectedYear}</p>
-          <p className="text-xs text-gray-400">{allInvoices.length} facturas totales cargadas</p>
+          <h3 className="text-lg font-semibold text-gray-800">Registro de Eventos</h3>
+          <p className="text-sm text-gray-500">Eventos registrados por mes - {selectedYear}</p>
+          <p className="text-xs text-gray-400">{allInvoices.length} eventos totales registrados</p>
         </div>
 
         <div className="flex items-center space-x-2">
-          <Button variant="outline" size="sm" onClick={() => handleYearChange(-1)} disabled={selectedYear <= 2018} className="h-8 w-8 p-0">
+          <Button variant="outline" size="sm" onClick={() => handleYearChange(-1)} disabled={selectedYear <= 2025} className="h-8 w-8 p-0">
             <ChevronLeft className="h-4 w-4" />
           </Button>
           <div className="w-20 text-center font-medium">{selectedYear}</div>
@@ -905,18 +909,14 @@ export default function PurchaseAnalyticsChart(): React.ReactElement {
       </div>
 
       <div className="p-4 pt-0">
-        <div className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-3">
-          <div className="rounded-lg border bg-gray-50 p-4">
-            <p className="text-sm font-medium text-gray-500">Total Anual</p>
+        <div className="mb-6 grid grid-cols-2 gap-4">
+          <div className="rounded-lg border bg-gray-50 p-4 shadow-sm">
+            <p className="text-sm font-medium text-gray-500 mb-1">Total Anual</p>
             <p className="text-2xl font-bold text-blue-600">{formatCurrency(totalMonto)}</p>
           </div>
-          <div className="rounded-lg border bg-gray-50 p-4">
-            <p className="text-sm font-medium text-gray-500">Total Facturas</p>
+          <div className="rounded-lg border bg-gray-50 p-4 shadow-sm">
+            <p className="text-sm font-medium text-gray-500 mb-1">Total Facturas</p>
             <p className="text-2xl font-bold text-gray-800">{totalFacturas.toLocaleString('es-ES')}</p>
-          </div>
-          <div className="rounded-lg border bg-gray-50 p-4">
-            <p className="text-sm font-medium text-gray-500">Promedio Mensual</p>
-            <p className="text-2xl font-bold text-emerald-600">{formatCurrency(totalMonto / 12)}</p>
           </div>
         </div>
 

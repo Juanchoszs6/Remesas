@@ -4,8 +4,8 @@ import { useState, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { RefreshCw } from 'lucide-react';
-import PurchaseAnalyticsChart from './PurchaseAnalyticsChart';
 import { toast } from 'sonner';
+import DashboardSelector from './DashboardSelector';
 
 // Componente Principal
 export default function AnalyticsSection() {
@@ -35,9 +35,9 @@ export default function AnalyticsSection() {
       <div className="space-y-6">
         <div className="flex flex-col space-y-4 md:flex-row md:items-center md:justify-between md:space-y-0">
           <div>
-            <h2 className="text-2xl font-bold tracking-tight">Análisis de Compras</h2>
+            <h2 className="text-2xl font-bold tracking-tight">Panel de Análisis</h2>
             <p className="text-sm text-muted-foreground">
-              Visualización de datos y métricas de compras
+              Visualización de datos y métricas
             </p>
           </div>
           <Button 
@@ -109,7 +109,7 @@ export default function AnalyticsSection() {
         </Button>
       </div>
       
-      <PurchaseAnalyticsChart key={refreshKey} />
+      <DashboardSelector key={refreshKey} />
     </div>
   );
 }

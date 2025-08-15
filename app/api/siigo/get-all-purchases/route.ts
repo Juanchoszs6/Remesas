@@ -13,13 +13,26 @@ export async function GET(request: Request) {
     );
   }
 
+  const { searchParams } = new URL(request.url);
+  const startDate = searchParams.get('startDate');
+  const endDate = searchParams.get('endDate');
+  
+  // Set default date range to current year if not provided
+  const currentYear = new Date().getFullYear();
+  const defaultStartDate = new Date(currentYear, 0, 1).toISOString().split('T')[0]; // January 1st of current year
+  const defaultEndDate = new Date().toISOString().split('T')[0]; // Today
+  
+  const dateFilter = startDate && endDate 
+    ? `&date>=${startDate}&date<=${endDate}`
+    : `&date>=${defaultStartDate}&date<=${defaultEndDate}`;
+
   try {
     // Configurar el cliente HTTP con el token
     const siigoApiUrl = process.env.SIIGO_API_URL || 'https://api.siigo.com/v1';
     
     // Fetch all purchase invoices with pagination
     const allInvoices = await fetchAllPages<SiigoPurchaseInvoice>(
-      '/purchases',
+      `/purchases?page=1&page_size=100${dateFilter}`,
       authToken,
       30 // Reducir el tamaño de página para mejor rendimiento
     );
@@ -38,15 +51,18 @@ export async function GET(request: Request) {
       // If we have supplier ID but no name, try to fetch supplier details
       if (supplierId && !supplierName) {
         try {
-          const supplierResponse = await fetch(`${siigoApiUrl}/suppliers/${supplierId}`, {
-            headers: {
-              'Authorization': `Bearer ${authToken}`,
-              'Partner-Id': process.env.SIIGO_PARTNER_ID || 'RemesasYMensajes',
+          const response = await fetch(
+            `${siigoApiUrl}/suppliers/${supplierId}`,
+            {
+              headers: {
+                'Authorization': `Bearer ${authToken}`,
+                'Partner-Id': process.env.SIIGO_PARTNER_ID || 'RemesasYMensajes',
+              },
             },
-          });
+          );
           
-          if (supplierResponse.ok) {
-            const supplierData = await supplierResponse.json();
+          if (response.ok) {
+            const supplierData = await response.json();
             supplierName = supplierData.name || '';
             supplierIdentification = supplierData.identification_number || supplierIdentification;
           }
